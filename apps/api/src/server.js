@@ -1,0 +1,14 @@
+import express from 'express';import cors from 'cors';import helmet from 'helmet';import morgan from 'morgan';import QRCode from 'qrcode';
+const app=express();const port=process.env.PORT||4000;app.use(helmet());app.use(cors({origin:process.env.FRONTEND_URL||'*'}));app.use(express.json());app.use(morgan('dev'));
+const events=[{id:'1',title:'Bollywood Rooftop Night',city:'London',status:'published',price:1200},{id:'2',title:'Tamil Indie Showcase',city:'London',status:'pending',price:800},{id:'3',title:'South Asian Founders Mixer',city:'Birmingham',status:'published',price:0}];
+let sponsorships=[{id:'sp_1',company:'Lotus Foods UK',eventId:'2',budget:75000,status:'new',message:'Interested in a stall and logo placement.'}];
+app.get('/api/health',(req,res)=>res.json({ok:true,service:'desi-events-api',version:'v1'}));
+app.get('/api/events',(req,res)=>res.json({ok:true,items:events}));
+app.get('/api/events/:id',(req,res)=>res.json({ok:true,item:events.find(e=>e.id===req.params.id)}));
+app.post('/api/events',(req,res)=>{const item={id:String(Date.now()),status:'pending',...req.body};events.push(item);res.status(201).json({ok:true,item});});
+app.post('/api/orders',async(req,res)=>{const ticketId='t_'+Date.now();const qr=await QRCode.toDataURL(ticketId);res.status(201).json({ok:true,order:{id:'ord_'+Date.now(),ticketId,qr,status:'paid_placeholder'}});});
+app.post('/api/sponsorships',(req,res)=>{const item={id:'sp_'+Date.now(),status:'new',...req.body};sponsorships.push(item);res.status(201).json({ok:true,item});});
+app.get('/api/admin/sponsorships',(req,res)=>res.json({ok:true,items:sponsorships}));
+app.patch('/api/admin/events/:id/approve',(req,res)=>{const e=events.find(x=>x.id===req.params.id);if(e)e.status='published';res.json({ok:true,item:e});});
+app.get('/api/admin/overview',(req,res)=>res.json({ok:true,data:{pendingEvents:events.filter(e=>e.status==='pending').length,activeEvents:events.filter(e=>e.status==='published').length,sponsorEnquiries:sponsorships.length,revenueMinor:1800000}}));
+app.listen(port,()=>console.log(`API running on ${port}`));

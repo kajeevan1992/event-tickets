@@ -1,0 +1,6 @@
+export const events=[
+{id:'1',title:'Bollywood Rooftop Night',city:'London',date:'Fri 8 May',time:'8:00 PM',price:'£12',image:'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200',category:'Desi Night',vibe:'Lit',organiser:'Local Desi Nights',boost:'Hidden Gem',desc:'A local-first rooftop party with Bollywood, Bhangra and Afrobeats. Built to spotlight underrated DJs and independent organisers.'},
+{id:'2',title:'Tamil Indie Showcase',city:'London',date:'Sat 16 May',time:'6:30 PM',price:'£8',image:'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=1200',category:'Live Music',vibe:'Community',organiser:'Indie Tamil Collective',boost:'Support Local',desc:'A showcase for Tamil independent artists, poets and creators with stalls and networking.'},
+{id:'3',title:'South Asian Founders Mixer',city:'Birmingham',date:'Sun 24 May',time:'3:00 PM',price:'Free',image:'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=1200',category:'Networking',vibe:'Professional',organiser:'Desi Business Circle',boost:'New Organiser',desc:'Friendly networking for founders, creatives and small business owners.'}
+];
+export const sponsorships=[{company:'Lotus Foods UK',event:'Tamil Indie Showcase',budget:'£750',status:'New'},{company:'Urban Chai Co',event:'Bollywood Rooftop Night',budget:'£1,200',status:'In Discussion'}];
