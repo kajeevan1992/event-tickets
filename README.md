@@ -1,8 +1,8 @@
-# LocalVibe / Desi Events Platform v3
+# LocalVibe / Desi Events Platform v4
 
 Standalone event discovery and ticketing web app.
 
-## v3 changes
+## v4 changes
 - API now has stronger event search endpoint: `GET /api/events?q=`
 - API event detail endpoint: `GET /api/events/:id`
 - API order/ticket list endpoint: `GET /api/orders`
@@ -36,3 +36,14 @@ PORT=4000
 ```
 
 Both frontend and backend include `.nvmrc` for Node 22.12.
+
+
+## v4 additions
+- Mobile-friendly header menu with Check-in shortcut.
+- Explore page live search and clickable filter chips.
+- Event cards show remaining tickets/vibe metadata.
+- Event detail page includes trust/why-book panel.
+- Checkout saves tickets to browser local storage and links to My Tickets.
+- My Tickets dashboard now shows locally saved tickets after checkout.
+- New `/checkin` page for organiser/manual QR ticket check-in workflow.
+- Footer/version text updated for v4.
