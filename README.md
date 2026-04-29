@@ -47,3 +47,10 @@ Both frontend and backend include `.nvmrc` for Node 22.12.
 - My Tickets dashboard now shows locally saved tickets after checkout.
 - New `/checkin` page for organiser/manual QR ticket check-in workflow.
 - Footer/version text updated for v4.
+
+## v12 interactive public polish
+- Removed Updates from the top navigation.
+- Added working left/right carousel buttons for category icons and every event row.
+- Kept main brand colour locked to #4b0b78.
+- Added hover effects for event cards, category icons, city pills, help cards and footer links.
+- Polished search button spacing, hero text spacing, footer legal alignment and country selector styling.
