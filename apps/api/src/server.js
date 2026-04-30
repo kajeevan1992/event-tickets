@@ -122,7 +122,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v49-stripe-payment-element';
+const BUILD_VERSION = 'v50-payment-recovery-ticket-page';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -227,6 +227,17 @@ app.post('/api/payments/create-payment-intent/:orderId', async (req, res) => {
   if (!key.startsWith('sk_')) return res.status(400).json({ ok:false, error:'Stripe key is not configured on API', order:safeOrder(order) });
   try {
     const stripe = new Stripe(key);
+    if (order.stripePaymentIntentId && order.stripePaymentIntentClientSecret) {
+      const existing = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId);
+      if (existing.status === 'succeeded') {
+        const ticket = await issuePaidTicket(order, 'stripe_payment_element_recovered');
+        return res.json({ ok:true, alreadyPaid:true, order:safeOrder(ticket) });
+      }
+      if (!['canceled','requires_payment_method'].includes(existing.status) && Number(existing.amount || 0) === Number(order.amountMinor || 0)) {
+        order.lastPaymentCheckedAt = new Date().toISOString();
+        return res.json({ ok:true, stripeEnabled:true, reused:true, clientSecret:order.stripePaymentIntentClientSecret, paymentIntentId:existing.id, paymentStatus:existing.status, order:safeOrder(order) });
+      }
+    }
     const intent = await stripe.paymentIntents.create({
       amount: Number(order.amountMinor || 0),
       currency: process.env.CURRENCY || 'gbp',
@@ -236,7 +247,9 @@ app.post('/api/payments/create-payment-intent/:orderId', async (req, res) => {
       description: (event.title || order.event || 'LocalVibe ticket') + ' x ' + (order.quantity || 1)
     });
     order.stripePaymentIntentId = intent.id;
+    order.stripePaymentIntentClientSecret = intent.client_secret;
     order.paymentProvider = 'stripe_payment_element';
+    order.lastPaymentCheckedAt = new Date().toISOString();
     res.json({ ok:true, stripeEnabled:true, clientSecret:intent.client_secret, paymentIntentId:intent.id, order:safeOrder(order) });
   } catch (err) {
     console.error('Stripe payment intent error', err);
@@ -263,6 +276,28 @@ app.post('/api/payments/confirm-payment-intent/:orderId', async (req, res) => {
   } catch (err) {
     console.error('Stripe payment intent confirm error', err);
     res.status(500).json({ ok:false, error:'Stripe payment confirmation failed', details:String(err.message || err) });
+  }
+});
+
+app.get('/api/payments/status/:orderId', async (req, res) => {
+  cleanupExpiredPendingOrders();
+  const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
+  if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, status:'paid', ticket:safeOrder(order), order:safeOrder(order) });
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (!key.startsWith('sk_') || !order.stripePaymentIntentId) return res.json({ ok:true, status:order.status, order:safeOrder(order), paymentStatus:null });
+  try {
+    const stripe = new Stripe(key);
+    const intent = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId);
+    order.lastPaymentCheckedAt = new Date().toISOString();
+    if (intent.status === 'succeeded') {
+      const ticket = await issuePaidTicket(order, 'stripe_payment_element_status_recovery');
+      return res.json({ ok:true, status:'paid', paymentStatus:intent.status, ticket:safeOrder(ticket), order:safeOrder(ticket) });
+    }
+    if (intent.status === 'payment_failed' && order.status !== 'paid') order.status = 'failed';
+    res.json({ ok:true, status:order.status, paymentStatus:intent.status, order:safeOrder(order) });
+  } catch (err) {
+    res.status(500).json({ ok:false, error:'Could not read Stripe payment status', details:String(err.message || err), order:safeOrder(order) });
   }
 });
 
@@ -324,7 +359,8 @@ app.post('/api/payments/demo-complete/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
   if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
   if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:safeOrder(order), alreadyPaid:true });
-  if (order.status === 'cancelled' || order.status === 'failed') return res.status(409).json({ ok:false, error:'Order is no longer payable', order:safeOrder(order) });
+  if ((order.amountMinor || 0) > 0 && process.env.ALLOW_TEST_PAYMENTS === 'false') return res.status(403).json({ ok:false, error:'Test payments are disabled for this deployment', order:safeOrder(order) });
+  if (['cancelled','failed','expired'].includes(order.status)) return res.status(409).json({ ok:false, error:'Order is no longer payable', order:safeOrder(order) });
   const event = events.find(e => e.id === order.eventId);
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
   const ticket = await issuePaidTicket(order, (order.amountMinor || 0) === 0 ? 'free' : 'test');
@@ -449,6 +485,13 @@ app.get('/api/tickets/:ticketId', (req,res)=>{
   const event = events.find(e => e.id === order.eventId);
   res.json({ ok:true, ticket:safeOrder(order) });
 });
+app.post('/api/tickets/:ticketId/send-email', (req,res)=>{
+  const order = orders.find(o => o.ticketId === req.params.ticketId);
+  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
+  order.lastEmailRequestedAt = new Date().toISOString();
+  res.json({ ok:true, message:'Ticket email delivery placeholder saved. Connect SMTP/provider next.', ticket:safeOrder(order) });
+});
+
 app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
   const order = orders.find(o => o.ticketId === req.params.ticketId);
   if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
