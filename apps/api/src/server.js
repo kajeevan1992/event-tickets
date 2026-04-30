@@ -11,6 +11,19 @@ app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
+
+// Root health routes for Coolify/browser checks.
+// These are intentionally outside /api so direct visits to the backend URL work:
+//   /        -> API status
+//   /health  -> health status
+app.get('/', (req, res) => {
+  res.json({ ok: true, service: 'LocalVibe API', status: 'running', version: 'v39-root-health-fix' });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ ok: true, service: 'LocalVibe API', status: 'healthy', version: 'v39-root-health-fix' });
+});
+
 let events = [
   { id:'1', title:'Bollywood Rooftop Night', city:'London', status:'published', priceMinor:1200, date:'Fri 8 May', time:'8:00 PM', category:'Desi Night', vibe:'Bollywood', boost:'Hidden Gem', organiser:'Rooftop Desi Collective', capacity:250, sold:128, image:'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?auto=format&fit=crop&w=1200&q=80', desc:'A local-first rooftop night with DJs, food and community energy.' },
   { id:'2', title:'Tamil Indie Showcase', city:'London', status:'pending', priceMinor:800, date:'Sat 16 May', time:'6:30 PM', category:'Live Music', vibe:'Tamil', boost:'Support Local', organiser:'Indie Tamil Arts', capacity:180, sold:44, image:'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80', desc:'Independent Tamil artists, spoken word and live music.' },
