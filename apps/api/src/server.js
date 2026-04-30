@@ -166,7 +166,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v56-qr-scanner-checkin';
+const BUILD_VERSION = 'v57-attendee-ops-export';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -616,6 +616,62 @@ app.post('/api/admin/tickets/:ticketId/resend-email', (req,res)=>{
   if(order.status !== 'paid' && order.status !== 'checked_in') return res.status(402).json({ ok:false, error:'Only paid tickets can be emailed' });
   const delivery = queueTicketEmail(order, 'admin');
   res.json({ ok:true, message:'Admin resend request recorded', delivery, ticket:safeOrder(order), receipt:publicReceipt(order) });
+});
+
+
+
+// v57: attendee operations, per-event sales/check-in stats and export-ready CSV data.
+function attendeeRows(eventId=''){
+  const id = String(eventId || '').trim();
+  return adminOrderList()
+    .filter(o => !id || String(o.eventId) === id)
+    .filter(o => ['paid','checked_in'].includes(o.status) || o.ticketId)
+    .map(o => ({
+      orderId:o.id,
+      ticketId:o.ticketId || '',
+      eventId:o.eventId,
+      eventTitle:o.eventTitle || o.event || '',
+      name:o.name || '',
+      email:o.email || '',
+      quantity:o.quantity || 1,
+      status:o.checkedInAt ? 'checked_in' : o.status,
+      amount:o.amount || money(o.amountMinor || 0),
+      paidAt:o.paidAt || '',
+      checkedInAt:o.checkedInAt || '',
+      receiptId:o.receiptId || ''
+    }));
+}
+function csvEscape(v){ return '"' + String(v ?? '').replace(/"/g,'""') + '"'; }
+function attendeeCsv(rows){
+  const cols=['orderId','ticketId','eventId','eventTitle','name','email','quantity','status','amount','paidAt','checkedInAt','receiptId'];
+  return [cols.join(','), ...rows.map(r=>cols.map(c=>csvEscape(r[c])).join(','))].join('\n');
+}
+function eventOpsStats(eventId=''){
+  const list = attendeeRows(eventId);
+  const checkedIn = list.filter(x=>x.checkedInAt).length;
+  const revenueMinor = (eventId ? adminOrderList().filter(o=>String(o.eventId)===String(eventId)) : adminOrderList())
+    .filter(o=>['paid','checked_in'].includes(o.status))
+    .reduce((sum,o)=>sum+Number(o.amountMinor||0),0);
+  return { attendees:list.length, checkedIn, notCheckedIn:Math.max(0,list.length-checkedIn), revenueMinor, revenue:money(revenueMinor) };
+}
+app.get('/api/admin/attendees', (req,res)=>{
+  const eventId = req.query.eventId || '';
+  res.json({ ok:true, stats:eventOpsStats(eventId), items:attendeeRows(eventId) });
+});
+app.get('/api/admin/events/:id/attendees', (req,res)=>{
+  res.json({ ok:true, stats:eventOpsStats(req.params.id), items:attendeeRows(req.params.id) });
+});
+app.get('/api/admin/events/:id/export.csv', (req,res)=>{
+  const rows = attendeeRows(req.params.id);
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition',`attachment; filename="localvibe-event-${req.params.id}-attendees.csv"`);
+  res.send(attendeeCsv(rows));
+});
+app.get('/api/admin/export/attendees.csv', (req,res)=>{
+  const rows = attendeeRows(req.query.eventId || '');
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition','attachment; filename="localvibe-attendees.csv"');
+  res.send(attendeeCsv(rows));
 });
 
 app.get('/api/organiser/overview', (req,res)=>{
