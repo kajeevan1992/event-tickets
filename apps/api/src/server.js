@@ -10,7 +10,7 @@ const port = process.env.PORT || 4000;
 app.use(helmet());
 app.use(cors({ origin: true, credentials: false }));
 // v45: Stripe webhook must read the raw body before JSON middleware.
-app.post('/api/stripe/webhook', express.raw({ type:'application/json' }), async (req, res) => {
+app.post(['/api/stripe/webhook','/api/webhooks/stripe'], express.raw({ type:'application/json' }), async (req, res) => {
   const key = process.env.STRIPE_SECRET_KEY || '';
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
   if (!key.startsWith('sk_') || !webhookSecret.startsWith('whsec_')) {
@@ -118,7 +118,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v47-admin-orders-checkin';
+const BUILD_VERSION = 'v48-stripe-test-keys-wired';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -129,6 +129,7 @@ function frontendUrlIsConfigured(){
 function getPaymentConfig(){
   return {
     stripeEnabled: stripeIsConfigured(),
+    stripePublishableKeyConfigured: String(process.env.STRIPE_PUBLISHABLE_KEY || '').startsWith('pk_'),
     webhookConfigured: String(process.env.STRIPE_WEBHOOK_SECRET || '').startsWith('whsec_'),
     frontendUrlConfigured: frontendUrlIsConfigured(),
     testPaymentsEnabled: process.env.ALLOW_TEST_PAYMENTS !== 'false',
@@ -243,7 +244,6 @@ app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
 app.post('/api/payments/confirm-session/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
   if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
-  if ((order.amountMinor || 0) > 0 && process.env.ALLOW_TEST_PAYMENTS === 'false') return res.status(403).json({ ok:false, error:'Test payment is disabled in this environment' });
   if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:safeOrder(order), alreadyPaid:true });
   const event = events.find(e => e.id === order.eventId);
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
