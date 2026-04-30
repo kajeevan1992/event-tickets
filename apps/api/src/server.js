@@ -80,7 +80,7 @@ const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.ma
 
 app.get('/', (req, res) => res.json({ ok:true, service:'LocalVibe API', message:'API is running', endpoints:['/health','/api/health','/api/events','/events'] }));
 app.get('/health', (req, res) => res.json({ ok:true, status:'healthy', service:'LocalVibe API' }));
-app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:'v46-production-env-and-payment-guards' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:'v47-admin-orders-checkin' }));
 function listEventsHandler(req, res) {
   const { q='', search='', city='', location='', status='', category='', when='', date='' } = req.query;
   const query = q || search;
@@ -118,7 +118,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v46-production-env-and-payment-guards';
+const BUILD_VERSION = 'v47-admin-orders-checkin';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -324,8 +324,22 @@ app.post('/api/sponsorships', (req,res)=>{
 app.get('/api/admin/sponsorships', (req,res)=>res.json({ ok:true, items:sponsorships.map(s=>({ ...s, budget:money(s.budgetMinor) })) }));
 app.patch('/api/admin/sponsorships/:id', (req,res)=>{ const s=sponsorships.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({ok:false}); Object.assign(s,req.body); res.json({ok:true,item:s}); });
 app.patch('/api/admin/events/:id/approve', (req,res)=>{ const e=events.find(x=>x.id===req.params.id); if(!e)return res.status(404).json({ok:false}); e.status='published'; res.json({ok:true,item:publicEvent(e)}); });
-app.get('/api/admin/overview', (req,res)=>res.json({ ok:true, data:{ pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:orders.length, revenueMinor:orders.reduce((sum,o)=>sum+Number(o.amountMinor||0),0) } }));
-
+function adminOrderList(){
+  const all = [...orders, ...pendingOrders.filter(p => !orders.some(o => o.id === p.id))];
+  return all.map(o => ({ ...safeOrder(o), eventTitle:events.find(e=>e.id===o.eventId)?.title || o.event, amount:money(o.amountMinor), createdAt:o.createdAt, paidAt:o.paidAt || null, checkedInAt:o.checkedInAt || null }));
+}
+function operationalMetrics(){
+  cleanupExpiredPendingOrders();
+  const allOrders = adminOrderList();
+  const paidOrders = allOrders.filter(o=>o.status === 'paid' || o.status === 'checked_in');
+  const pending = allOrders.filter(o=>o.status === 'pending_payment');
+  const failed = allOrders.filter(o=>['failed','cancelled','expired'].includes(o.status));
+  const checkedIn = allOrders.filter(o=>o.checkedInAt);
+  const revenueMinor = paidOrders.reduce((sum,o)=>sum+Number(o.amountMinor||0),0);
+  return { build: BUILD_VERSION, payment:getPaymentConfig(), pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:allOrders.length, paidOrders:paidOrders.length, pendingOrders:pending.length, failedOrders:failed.length, checkedIn:checkedIn.length, ticketsIssued:paidOrders.filter(o=>o.ticketId).length, revenueMinor, revenue:money(revenueMinor) };
+}
+app.get('/api/admin/overview', (req,res)=>res.json({ ok:true, data:operationalMetrics() }));
+app.get('/api/admin/payment-health', (req,res)=>res.json({ ok:true, data:operationalMetrics() }));
 app.get('/api/updates', (req,res)=>res.json({ ok:true, items:updates }));
 app.post('/api/contact-sales', (req,res)=>{
   const item = { id:'lead_' + Date.now(), status:'new', createdAt:new Date().toISOString(), ...req.body };
@@ -407,7 +421,10 @@ app.patch('/api/admin/events/:id/reject', (req,res)=>{
   res.json({ ok:true, item:publicEvent(event) });
 });
 app.get('/api/admin/orders', (req,res)=>{
-  res.json({ ok:true, items:orders.map(o => ({ ...safeOrder(o), eventTitle:events.find(e=>e.id===o.eventId)?.title || o.event })) });
+  res.json({ ok:true, items:adminOrderList() });
+});
+app.get('/api/admin/checkin-log', (req,res)=>{
+  res.json({ ok:true, items:adminOrderList().filter(o=>o.checkedInAt) });
 });
 
 app.get('/api/organiser/overview', (req,res)=>{
