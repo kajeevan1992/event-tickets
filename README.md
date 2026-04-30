@@ -60,3 +60,9 @@ Both frontend and backend include `.nvmrc` for Node 22.12.
 - Added ticket, promotion, sponsorship and review stages.
 - Added live event card preview and launch checklist.
 - Frontend-only UI build; database save can be wired in the next backend build.
+
+
+## v20
+- Added lightweight login API, ticket lookup API, categories/cities/help endpoints.
+- Sign in and Find My Tickets pages now submit to the API when `VITE_API_URL` is set.
+- Added ticket lookup UI with QR display for created orders.

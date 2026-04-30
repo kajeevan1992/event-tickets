@@ -33,7 +33,7 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v19-api-connected-pages' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v20-auth-ticket-api-polish' }));
 app.get('/api/events', (req, res) => {
   const { q='', city='', status='' } = req.query;
   let items = events;
@@ -84,5 +84,37 @@ app.post('/api/contact-sales', (req,res)=>{
   res.status(201).json({ ok:true, item });
 });
 app.get('/api/admin/contact-sales', (req,res)=>res.json({ ok:true, items:salesLeads }));
+
+
+
+// v20: lightweight account, ticket lookup, categories/cities and help APIs
+let users = [
+  { id:'u_1', name:'Demo User', email:'demo@localvibe.test', role:'customer' },
+  { id:'u_2', name:'Demo Organiser', email:'organiser@localvibe.test', role:'organiser' }
+];
+let helpArticles = [
+  { id:'h1', topic:'tickets', title:'Find your tickets', body:'Enter the email used at checkout to see upcoming tickets.' },
+  { id:'h2', topic:'refunds', title:'Request a refund', body:'Refund requests are sent to the organiser for review.' },
+  { id:'h3', topic:'organisers', title:'Contact the event organiser', body:'Use the contact link on the event page or ticket page.' },
+  { id:'h4', topic:'account', title:'Edit your order information', body:'Sign in and choose the ticket you want to update.' }
+];
+const categoryList = ['Music','Nightlife','Performing & Visual Arts','Holidays','Dating','Hobbies','Business','Food & Drink','Desi Night','Tamil','Bollywood','Networking'];
+const cityList = ['London','Birmingham','Leicester','Manchester','Luton','Croydon','Wembley','Harrow'];
+
+app.post('/api/auth/login', (req,res)=>{
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if(!email) return res.status(400).json({ ok:false, error:'Email is required' });
+  let user = users.find(u=>u.email.toLowerCase()===email);
+  if(!user){ user = { id:'u_' + Date.now(), name:email.split('@')[0], email, role:'customer' }; users.unshift(user); }
+  res.json({ ok:true, token:'demo-token-' + user.id, user });
+});
+app.get('/api/me/tickets', (req,res)=>{
+  const email = String(req.query.email || '').toLowerCase();
+  const items = orders.filter(o => !email || String(o.email||'').toLowerCase()===email);
+  res.json({ ok:true, items });
+});
+app.get('/api/categories', (req,res)=>res.json({ ok:true, items:categoryList }));
+app.get('/api/cities', (req,res)=>res.json({ ok:true, items:cityList }));
+app.get('/api/help/articles', (req,res)=>res.json({ ok:true, items:helpArticles }));
 
 app.listen(port, () => console.log(`API running on ${port}`));
