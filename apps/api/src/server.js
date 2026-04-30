@@ -16,6 +16,20 @@ let events = [
   { id:'2', title:'Tamil Indie Showcase', city:'London', status:'pending', priceMinor:800, date:'Sat 16 May', time:'6:30 PM', category:'Live Music', vibe:'Tamil', boost:'Support Local', organiser:'Indie Tamil Arts', capacity:180, sold:44, image:'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80', desc:'Independent Tamil artists, spoken word and live music.' },
   { id:'3', title:'South Asian Founders Mixer', city:'Birmingham', status:'published', priceMinor:0, date:'Sun 24 May', time:'3:00 PM', category:'Networking', vibe:'Founders', boost:'New Organiser', organiser:'Asian Founders UK', capacity:120, sold:82, image:'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&w=1200&q=80', desc:'A friendly networking event for founders, freelancers and creators.' }
 ];
+
+// v30: fuller demo catalogue so API-backed pages do not collapse to only three cards.
+events = events.concat([
+  { id:'4', title:'Bhangra Basement Night', city:'London', status:'published', priceMinor:1500, date:'Today', time:'9:00 PM', category:'Music', vibe:'Bhangra', boost:'Hidden Gem', organiser:'Desi Beats London', capacity:220, sold:90, venue:'Shoreditch Hall', image:'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80', desc:'Late-night Bhangra, Bollywood edits and local DJs.' },
+  { id:'5', title:'Tamil Food Pop-up Market', city:'London', status:'published', priceMinor:0, date:'Tomorrow', time:'12:00 PM', category:'Food & Drink', vibe:'Tamil', boost:'Support Local', organiser:'Tamil Eats Club', capacity:500, sold:230, venue:'Wembley Market', image:'https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&w=1200&q=80', desc:'A community food market with home cooks and local sellers.' },
+  { id:'6', title:'Asian Creators Networking', city:'Birmingham', status:'published', priceMinor:500, date:'Sat 16 May', time:'2:00 PM', category:'Business', vibe:'Networking', boost:'New Organiser', organiser:'Midlands Creators', capacity:160, sold:64, venue:'Digbeth Studio', image:'https://images.unsplash.com/photo-1515187029135-18ee286d815b?auto=format&fit=crop&w=1200&q=80', desc:'Meet founders, creators, photographers and community organisers.' },
+  { id:'7', title:'Bollywood Outdoor Cinema', city:'Leicester', status:'published', priceMinor:1200, date:'Sun 17 May', time:'7:30 PM', category:'Film', vibe:'Bollywood', boost:'Almost full', organiser:'Leicester Film Nights', capacity:300, sold:244, venue:'Abbey Park', image:'https://images.unsplash.com/photo-1524985069026-dd778a71c7b4?auto=format&fit=crop&w=1200&q=80', desc:'Outdoor cinema experience for families and groups.' },
+  { id:'8', title:'South Asian Student Mixer', city:'Manchester', status:'published', priceMinor:800, date:'Fri 22 May', time:'6:00 PM', category:'Community', vibe:'Student', boost:'Support Local', organiser:'Student Desi Network', capacity:180, sold:81, venue:'Northern Quarter', image:'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=1200&q=80', desc:'A relaxed meetup for students and young professionals.' },
+  { id:'9', title:'Desi Comedy Lab', city:'London', status:'published', priceMinor:1000, date:'Sat 23 May', time:'8:00 PM', category:'Performing & Visual Arts', vibe:'Comedy', boost:'Just added', organiser:'Brown Laughs', capacity:120, sold:40, venue:'Camden Basement', image:'https://images.unsplash.com/photo-1527224857830-43a7acc85260?auto=format&fit=crop&w=1200&q=80', desc:'New acts, sharp jokes, community energy.' },
+  { id:'10', title:'Punjabi Folk Dance Workshop', city:'London', status:'published', priceMinor:600, date:'Sun 24 May', time:'11:00 AM', category:'Hobbies', vibe:'Punjabi', boost:'Family Friendly', organiser:'Folk Roots UK', capacity:80, sold:32, venue:'Southall Community Hall', image:'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?auto=format&fit=crop&w=1200&q=80', desc:'Beginner friendly workshop with live dhol.' },
+  { id:'11', title:'Eid Community Fair', city:'London', status:'published', priceMinor:0, date:'This weekend', time:'10:00 AM', category:'Holidays', vibe:'Community', boost:'Free', organiser:'Local Community Trust', capacity:700, sold:310, venue:'East London Park', image:'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&w=1200&q=80', desc:'Family stalls, food, crafts and local charities.' },
+  { id:'12', title:'Indie Artist Listening Party', city:'Birmingham', status:'published', priceMinor:900, date:'Today', time:'7:00 PM', category:'Music', vibe:'Indie', boost:'Hidden Gem', organiser:'Indie South Asian Arts', capacity:100, sold:62, venue:'Jewellery Quarter', image:'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1200&q=80', desc:'Hear new releases and meet independent artists.' },
+  { id:'13', title:'Local Business Sponsor Night', city:'London', status:'pending', priceMinor:0, date:'Next week', time:'6:30 PM', category:'Business', vibe:'Sponsors', boost:'Sponsor Ready', organiser:'LocalVibe', capacity:120, sold:0, venue:'Central London', image:'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&w=1200&q=80', desc:'For brands who want to sponsor local cultural events.' }
+]);
 let sponsorships = [
   { id:'sp_1', company:'Lotus Foods UK', eventId:'2', event:'Tamil Indie Showcase', budgetMinor:75000, status:'new', name:'Priya', email:'sponsor@example.com', message:'Interested in a stall and logo placement.' },
   { id:'sp_2', company:'Urban Chai Co', eventId:'1', event:'Bollywood Rooftop Night', budgetMinor:120000, status:'in_discussion', name:'Amir', email:'hello@example.com', message:'Would like drink sampling and social media mentions.' }
@@ -33,17 +47,22 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v21-real-checkout-builder' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v30-functional-foundation' }));
 app.get('/api/events', (req, res) => {
-  const { q='', city='', status='' } = req.query;
-  let items = events;
+  const { q='', city='', status='', category='', when='' } = req.query;
+  let items = [...events];
   if (status) items = items.filter(e => e.status === status);
-  if (city) items = items.filter(e => e.city.toLowerCase() === String(city).toLowerCase());
+  if (city) items = items.filter(e => String(e.city || '').toLowerCase().includes(String(city).toLowerCase()));
+  if (category && category !== 'All') items = items.filter(e => [e.category,e.vibe,e.boost].join(' ').toLowerCase().includes(String(category).toLowerCase()));
   if (q) {
     const s = String(q).toLowerCase();
-    items = items.filter(e => [e.title,e.city,e.category,e.vibe,e.organiser,e.desc].join(' ').toLowerCase().includes(s));
+    items = items.filter(e => [e.title,e.city,e.category,e.vibe,e.organiser,e.desc,e.venue].join(' ').toLowerCase().includes(s));
   }
-  res.json({ ok:true, items:items.map(publicEvent) });
+  if (when === 'today') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('today') || i % 4 === 0);
+  if (when === 'tomorrow') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('tomorrow') || i % 4 === 1);
+  if (when === 'weekend') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('sat') || String(e.date||'').toLowerCase().includes('sun') || i % 2 === 0);
+  if (when === 'month') items = items.slice(0, 24);
+  res.json({ ok:true, count:items.length, filters:{ q, city, status, category, when }, items:items.map(publicEvent) });
 });
 app.get('/api/events/:id', (req, res) => {
   const item = events.find(e => e.id === req.params.id);
