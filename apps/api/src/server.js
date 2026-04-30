@@ -80,7 +80,7 @@ const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.ma
 
 app.get('/', (req, res) => res.json({ ok:true, service:'LocalVibe API', message:'API is running', endpoints:['/health','/api/health','/api/events','/events'] }));
 app.get('/health', (req, res) => res.json({ ok:true, status:'healthy', service:'LocalVibe API' }));
-app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:'v45-stripe-webhook-capacity' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:'v46-production-env-and-payment-guards' }));
 function listEventsHandler(req, res) {
   const { q='', search='', city='', location='', status='', category='', when='', date='' } = req.query;
   const query = q || search;
@@ -117,7 +117,51 @@ app.post('/api/events', (req, res) => {
   res.status(201).json({ ok:true, item:publicEvent(item) });
 });
 
+// v46: production readiness helpers
+const BUILD_VERSION = 'v46-production-env-and-payment-guards';
+const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
+function stripeIsConfigured(){
+  return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
+}
+function frontendUrlIsConfigured(){
+  return Boolean(process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL);
+}
+function getPaymentConfig(){
+  return {
+    stripeEnabled: stripeIsConfigured(),
+    webhookConfigured: String(process.env.STRIPE_WEBHOOK_SECRET || '').startsWith('whsec_'),
+    frontendUrlConfigured: frontendUrlIsConfigured(),
+    testPaymentsEnabled: process.env.ALLOW_TEST_PAYMENTS !== 'false',
+    currency: process.env.CURRENCY || 'gbp',
+    build: BUILD_VERSION
+  };
+}
+function cleanupExpiredPendingOrders(){
+  const now = Date.now();
+  for (const order of pendingOrders) {
+    if (order.status === 'pending_payment' && now - Date.parse(order.createdAt || 0) > pendingTtlMs) {
+      order.status = 'expired';
+      order.expiredAt = new Date().toISOString();
+    }
+  }
+}
+function assertCapacityAvailable(order){
+  const event = events.find(e => e.id === order.eventId);
+  if(!event) { const err = new Error('Event not found'); err.status = 404; throw err; }
+  const remaining = Math.max((event.capacity || 0) - (event.sold || 0), 0);
+  if (remaining < Number(order.quantity || 1) && !order.capacityCommittedAt) {
+    const err = new Error('Not enough tickets remaining');
+    err.status = 409;
+    err.remaining = remaining;
+    throw err;
+  }
+  return event;
+}
+app.get('/api/config', (req,res)=>res.json({ ok:true, config:getPaymentConfig() }));
+app.get('/api/payments/config', (req,res)=>res.json({ ok:true, config:getPaymentConfig() }));
+
 app.post('/api/checkout/start', async (req, res) => {
+  cleanupExpiredPendingOrders();
   const event = events.find(e => e.id === String(req.body.eventId));
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
   const quantity = Math.max(1, Math.min(10, Number(req.body.quantity || 1)));
@@ -144,26 +188,35 @@ async function issuePaidTicket(order, provider='manual'){
   if(order.status === 'paid' && order.ticketId){
     return orders.find(o => o.id === order.id) || order;
   }
-  const event = events.find(e => e.id === order.eventId);
-  if(!event) throw new Error('Event not found');
-  const ticketId = 't_' + Date.now();
+  if(['cancelled','failed','expired'].includes(order.status)){
+    const err = new Error('Order is no longer payable'); err.status = 409; throw err;
+  }
+  const event = assertCapacityAvailable(order);
+  const ticketId = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
   const paidAt = new Date().toISOString();
   const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
-  const ticket = { ...order, ticketId, qr, status:'paid', paidAt, paymentProvider:provider };
-  Object.assign(order, { ticketId, qr, status:'paid', paidAt, paymentProvider:provider });
+  const ticket = { ...order, ticketId, qr, status:'paid', paidAt, paymentProvider:provider, capacityCommittedAt:new Date().toISOString() };
+  Object.assign(order, ticket);
   const existingIndex = orders.findIndex(o => o.id === order.id);
   if(existingIndex >= 0) orders[existingIndex] = { ...orders[existingIndex], ...ticket };
   else orders.unshift(ticket);
-  event.sold = (event.sold || 0) + Number(order.quantity || 1);
-  return ticket;
+  pendingOrders = pendingOrders.filter(o => o.id !== order.id);
+  if(!order.soldIncrementedAt){
+    event.sold = (event.sold || 0) + Number(order.quantity || 1);
+    order.soldIncrementedAt = new Date().toISOString();
+    const orderIndex = orders.findIndex(o => o.id === order.id);
+    if(orderIndex >= 0) orders[orderIndex].soldIncrementedAt = order.soldIncrementedAt;
+  }
+  return orders.find(o => o.id === order.id) || ticket;
 }
+
 app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
   if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
   if (order.status === 'paid') return res.json({ ok:true, alreadyPaid:true, order:safeOrder(order) });
   if (order.status === 'cancelled' || order.status === 'failed') return res.status(409).json({ ok:false, error:'Order is no longer payable', order:safeOrder(order) });
-  const event = events.find(e => e.id === order.eventId);
-  if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  let event;
+  try { event = assertCapacityAvailable(order); } catch(err) { return res.status(err.status || 400).json({ ok:false, error:err.message, remaining:err.remaining, order:safeOrder(order) }); }
   if ((order.amountMinor || 0) <= 0) return res.json({ ok:true, stripeEnabled:false, message:'This is a free order. Use complete free/test ticket to issue after confirmation.', order:safeOrder(order) });
   const key = process.env.STRIPE_SECRET_KEY || '';
   if (!key.startsWith('sk_')) return res.json({ ok:true, stripeEnabled:false, message:'Stripe key is not configured. Use test payment only.', order });
@@ -174,7 +227,7 @@ app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
       mode:'payment',
       payment_method_types:['card'],
       customer_email:order.email || undefined,
-      line_items:[{ price_data:{ currency:'gbp', product_data:{ name:event.title || order.event || 'LocalVibe ticket' }, unit_amount:event.priceMinor || 0 }, quantity:order.quantity || 1 }],
+      line_items:[{ price_data:{ currency:(process.env.CURRENCY || 'gbp'), product_data:{ name:event.title || order.event || 'LocalVibe ticket' }, unit_amount:event.priceMinor || 0 }, quantity:order.quantity || 1 }],
       metadata:{ orderId:order.id, eventId:event.id },
       success_url:`${frontend}/payment/${order.id}?stripe=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:`${frontend}/payment/${order.id}?stripe=cancelled`
@@ -190,6 +243,7 @@ app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
 app.post('/api/payments/confirm-session/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
   if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if ((order.amountMinor || 0) > 0 && process.env.ALLOW_TEST_PAYMENTS === 'false') return res.status(403).json({ ok:false, error:'Test payment is disabled in this environment' });
   if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:safeOrder(order), alreadyPaid:true });
   const event = events.find(e => e.id === order.eventId);
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
@@ -270,7 +324,7 @@ app.post('/api/sponsorships', (req,res)=>{
 app.get('/api/admin/sponsorships', (req,res)=>res.json({ ok:true, items:sponsorships.map(s=>({ ...s, budget:money(s.budgetMinor) })) }));
 app.patch('/api/admin/sponsorships/:id', (req,res)=>{ const s=sponsorships.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({ok:false}); Object.assign(s,req.body); res.json({ok:true,item:s}); });
 app.patch('/api/admin/events/:id/approve', (req,res)=>{ const e=events.find(x=>x.id===req.params.id); if(!e)return res.status(404).json({ok:false}); e.status='published'; res.json({ok:true,item:publicEvent(e)}); });
-app.get('/api/admin/overview', (req,res)=>res.json({ ok:true, data:{ pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:orders.length, revenueMinor:orders.reduce((sum,o)=>sum+(events.find(e=>e.id===o.eventId)?.priceMinor||0),1800000) } }));
+app.get('/api/admin/overview', (req,res)=>res.json({ ok:true, data:{ pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:orders.length, revenueMinor:orders.reduce((sum,o)=>sum+Number(o.amountMinor||0),0) } }));
 
 app.get('/api/updates', (req,res)=>res.json({ ok:true, items:updates }));
 app.post('/api/contact-sales', (req,res)=>{
