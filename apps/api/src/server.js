@@ -47,7 +47,7 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v30-functional-foundation' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v31-ticket-checkin-admin-foundation' }));
 app.get('/api/events', (req, res) => {
   const { q='', city='', status='', category='', when='' } = req.query;
   let items = [...events];
@@ -142,6 +142,44 @@ let promoCodes = [
   { code:'LOCAL10', type:'percent', amount:10, active:true },
   { code:'DESI5', type:'fixed', amountMinor:500, active:true }
 ];
+
+// v31: safer ticket lookup/check-in, event moderation, and admin order APIs
+app.get('/api/tickets/:ticketId', (req,res)=>{
+  const order = orders.find(o => o.ticketId === req.params.ticketId);
+  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
+  const event = events.find(e => e.id === order.eventId);
+  res.json({ ok:true, ticket:{ ...order, eventDetail:event ? publicEvent(event) : null } });
+});
+app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
+  const order = orders.find(o => o.ticketId === req.params.ticketId);
+  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
+  if(order.checkedInAt) return res.status(409).json({ ok:false, error:'Ticket already checked in', ticket:order });
+  order.status = 'checked_in';
+  order.checkedInAt = new Date().toISOString();
+  res.json({ ok:true, status:'checked_in', ticket:order });
+});
+app.patch('/api/events/:id', (req,res)=>{
+  const event = events.find(e => e.id === req.params.id);
+  if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  Object.assign(event, req.body || {});
+  res.json({ ok:true, item:publicEvent(event) });
+});
+app.delete('/api/events/:id', (req,res)=>{
+  const before = events.length;
+  events = events.filter(e => e.id !== req.params.id);
+  res.json({ ok:true, deleted: before !== events.length });
+});
+app.patch('/api/admin/events/:id/reject', (req,res)=>{
+  const event = events.find(e => e.id === req.params.id);
+  if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  event.status = 'rejected';
+  event.rejectionReason = req.body?.reason || 'Needs more information';
+  res.json({ ok:true, item:publicEvent(event) });
+});
+app.get('/api/admin/orders', (req,res)=>{
+  res.json({ ok:true, items:orders.map(o => ({ ...o, eventDetail:events.find(e=>e.id===o.eventId)?.title || o.event })) });
+});
+
 app.get('/api/organiser/overview', (req,res)=>{
   const totalSold = events.reduce((sum,e)=>sum+(e.sold||0),0);
   const revenueMinor = events.reduce((sum,e)=>sum+(e.sold||0)*(e.priceMinor||0),0);
