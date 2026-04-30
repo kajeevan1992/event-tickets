@@ -71,6 +71,7 @@ let sponsorships = [
 let orders = [];
 let pendingOrders = [];
 let salesLeads = [];
+let emailDeliveries = [];
 let updates = [
   { date:'Apr 17, 2026', title:'New organiser profile page', body:'Your public profile now shows images, socials, upcoming events and trust badges.' },
   { date:'Apr 14, 2026', title:'Top organiser badge', body:'Creators who consistently run quality events earn a badge across their profile and listings.' },
@@ -81,6 +82,30 @@ let updates = [
 
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
+const formatDateTime = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : null;
+function publicReceipt(order){
+  if(!order) return null;
+  const event = events.find(e => e.id === order.eventId);
+  const subtotalMinor = Number(order.amountMinor || 0);
+  const qty = Math.max(1, Number(order.quantity || 1));
+  return {
+    receiptId: order.receiptId || null,
+    orderId: order.id,
+    ticketId: order.ticketId || null,
+    status: order.status,
+    paymentProvider: order.paymentProvider || null,
+    paidAt: order.paidAt || null,
+    paidAtLabel: formatDateTime(order.paidAt),
+    customer:{ name:order.name, email:order.email },
+    event:event ? publicEvent(event) : { id:order.eventId, title:order.event },
+    quantity:qty,
+    currency:(process.env.CURRENCY || 'gbp').toUpperCase(),
+    subtotalMinor,
+    totalMinor:subtotalMinor,
+    total:money(subtotalMinor),
+    lineItems:[{ label:event?.title || order.event || 'LocalVibe ticket', quantity:qty, unitAmountMinor:event?.priceMinor || Math.round(subtotalMinor / qty), totalMinor:subtotalMinor, total:money(subtotalMinor) }]
+  };
+}
 
 app.get('/', (req, res) => res.json({ ok:true, service:'LocalVibe API', message:'API is running', endpoints:['/health','/api/health','/api/events','/events'] }));
 app.get('/health', (req, res) => res.json({ ok:true, status:'healthy', service:'LocalVibe API' }));
@@ -122,7 +147,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v50-payment-recovery-ticket-page';
+const BUILD_VERSION = 'v51-ticket-receipts-email-log';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -200,7 +225,8 @@ async function issuePaidTicket(order, provider='manual'){
   const ticketId = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
   const paidAt = new Date().toISOString();
   const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
-  const ticket = { ...order, ticketId, qr, status:'paid', paidAt, paymentProvider:provider, capacityCommittedAt:new Date().toISOString() };
+  const receiptId = order.receiptId || ('rcpt_' + Date.now() + '_' + Math.random().toString(36).slice(2,6));
+  const ticket = { ...order, ticketId, receiptId, qr, status:'paid', paidAt, paymentProvider:provider, capacityCommittedAt:new Date().toISOString() };
   Object.assign(order, ticket);
   const existingIndex = orders.findIndex(o => o.id === order.id);
   if(existingIndex >= 0) orders[existingIndex] = { ...orders[existingIndex], ...ticket };
@@ -394,7 +420,13 @@ app.get('/api/orders', (req,res)=>res.json({ ok:true, items:orders.map(safeOrder
 app.get('/api/orders/:orderId', (req,res)=>{
   const order = orders.find(o => o.id === req.params.orderId) || pendingOrders.find(o => o.id === req.params.orderId);
   if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
-  res.json({ ok:true, order:safeOrder(order) });
+  res.json({ ok:true, order:safeOrder(order), receipt:publicReceipt(order) });
+});
+app.get('/api/orders/:orderId/receipt', (req,res)=>{
+  const order = orders.find(o => o.id === req.params.orderId) || pendingOrders.find(o => o.id === req.params.orderId);
+  if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if(order.status !== 'paid' && order.status !== 'checked_in') return res.status(402).json({ ok:false, error:'Receipt is available after payment is confirmed', order:safeOrder(order) });
+  res.json({ ok:true, receipt:publicReceipt(order) });
 });
 app.post('/api/checkin', (req,res)=>{
   const ticketId = req.body.ticketId;
@@ -482,14 +514,20 @@ let promoCodes = [
 app.get('/api/tickets/:ticketId', (req,res)=>{
   const order = orders.find(o => o.ticketId === req.params.ticketId);
   if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
-  const event = events.find(e => e.id === order.eventId);
-  res.json({ ok:true, ticket:safeOrder(order) });
+  res.json({ ok:true, ticket:safeOrder(order), receipt:publicReceipt(order) });
+});
+app.get('/api/tickets/:ticketId/receipt', (req,res)=>{
+  const order = orders.find(o => o.ticketId === req.params.ticketId);
+  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
+  res.json({ ok:true, receipt:publicReceipt(order) });
 });
 app.post('/api/tickets/:ticketId/send-email', (req,res)=>{
   const order = orders.find(o => o.ticketId === req.params.ticketId);
   if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
-  order.lastEmailRequestedAt = new Date().toISOString();
-  res.json({ ok:true, message:'Ticket email delivery placeholder saved. Connect SMTP/provider next.', ticket:safeOrder(order) });
+  const delivery = { id:'email_' + Date.now(), ticketId:order.ticketId, orderId:order.id, to:order.email, customer:order.name, event:order.event, status:'queued_placeholder', createdAt:new Date().toISOString(), provider:process.env.EMAIL_PROVIDER || 'not_connected' };
+  emailDeliveries.unshift(delivery);
+  order.lastEmailRequestedAt = delivery.createdAt;
+  res.json({ ok:true, message:'Ticket email queued placeholder saved. Connect SMTP/provider next.', delivery, ticket:safeOrder(order), receipt:publicReceipt(order) });
 });
 
 app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
@@ -523,6 +561,9 @@ app.get('/api/admin/orders', (req,res)=>{
 });
 app.get('/api/admin/checkin-log', (req,res)=>{
   res.json({ ok:true, items:adminOrderList().filter(o=>o.checkedInAt) });
+});
+app.get('/api/admin/email-log', (req,res)=>{
+  res.json({ ok:true, items:emailDeliveries });
 });
 
 app.get('/api/organiser/overview', (req,res)=>{
