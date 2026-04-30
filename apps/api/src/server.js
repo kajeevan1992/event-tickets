@@ -83,6 +83,25 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 const formatDateTime = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : null;
+function buildTicketEmail(order){
+  const receipt = publicReceipt(order);
+  const ticketUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/ticket/${order.ticketId}`;
+  const subject = `Your LocalVibe ticket for ${order.event}`;
+  const text = [`Hi ${order.name || 'there'},`,'',`Your ticket is ready for ${order.event}.`,`Ticket ID: ${order.ticketId}`,`Order ID: ${order.id}`,`Receipt: ${receipt?.receiptId || 'pending'}`,`Total: ${receipt?.total || money(order.amountMinor)}`,'',`Open ticket: ${ticketUrl}`,'','Show the QR code at the door. Do not share this ticket publicly.'].join('\n');
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111"><h2>Your LocalVibe ticket is ready</h2><p>Hi ${order.name || 'there'},</p><p>Your ticket for <strong>${order.event}</strong> is confirmed.</p><p><strong>Ticket ID:</strong> ${order.ticketId}<br/><strong>Order ID:</strong> ${order.id}<br/><strong>Total:</strong> ${receipt?.total || money(order.amountMinor)}</p><p><a href="${ticketUrl}" style="display:inline-block;background:#111;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none">Open QR ticket</a></p><p style="font-size:12px;color:#666">Show the QR code at the door. Do not share this ticket publicly.</p></div>`;
+  return { subject, text, html, ticketUrl };
+}
+function queueTicketEmail(order, requestedBy='customer'){
+  const content = buildTicketEmail(order);
+  const provider = process.env.EMAIL_PROVIDER || 'not_connected';
+  const connected = Boolean(process.env.SMTP_HOST || process.env.RESEND_API_KEY || process.env.SENDGRID_API_KEY);
+  const delivery = { id:'email_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), ticketId:order.ticketId, orderId:order.id, to:order.email, customer:order.name, event:order.event, subject:content.subject, status:connected ? 'ready_for_provider' : 'queued_placeholder', provider, requestedBy, createdAt:new Date().toISOString(), ticketUrl:content.ticketUrl, previewText:content.text };
+  emailDeliveries.unshift(delivery);
+  order.lastEmailRequestedAt = delivery.createdAt;
+  order.lastEmailDeliveryId = delivery.id;
+  return delivery;
+}
+
 function publicReceipt(order){
   if(!order) return null;
   const event = events.find(e => e.id === order.eventId);
@@ -109,7 +128,7 @@ function publicReceipt(order){
 
 app.get('/', (req, res) => res.json({ ok:true, service:'LocalVibe API', message:'API is running', endpoints:['/health','/api/health','/api/events','/events'] }));
 app.get('/health', (req, res) => res.json({ ok:true, status:'healthy', service:'LocalVibe API' }));
-app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:'v47-admin-orders-checkin' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:BUILD_VERSION }));
 function listEventsHandler(req, res) {
   const { q='', search='', city='', location='', status='', category='', when='', date='' } = req.query;
   const query = q || search;
@@ -147,7 +166,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v51-ticket-receipts-email-log';
+const BUILD_VERSION = 'v52-email-delivery-ops';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -459,7 +478,7 @@ function operationalMetrics(){
   const failed = allOrders.filter(o=>['failed','cancelled','expired'].includes(o.status));
   const checkedIn = allOrders.filter(o=>o.checkedInAt);
   const revenueMinor = paidOrders.reduce((sum,o)=>sum+Number(o.amountMinor||0),0);
-  return { build: BUILD_VERSION, payment:getPaymentConfig(), pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:allOrders.length, paidOrders:paidOrders.length, pendingOrders:pending.length, failedOrders:failed.length, checkedIn:checkedIn.length, ticketsIssued:paidOrders.filter(o=>o.ticketId).length, revenueMinor, revenue:money(revenueMinor) };
+  return { build: BUILD_VERSION, payment:getPaymentConfig(), pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:allOrders.length, paidOrders:paidOrders.length, pendingOrders:pending.length, failedOrders:failed.length, checkedIn:checkedIn.length, ticketsIssued:paidOrders.filter(o=>o.ticketId).length, revenueMinor, revenue:money(revenueMinor), emailRequests:emailDeliveries.length, emailProvider:process.env.EMAIL_PROVIDER || 'not_connected' };
 }
 app.get('/api/admin/overview', (req,res)=>res.json({ ok:true, data:operationalMetrics() }));
 app.get('/api/admin/payment-health', (req,res)=>res.json({ ok:true, data:operationalMetrics() }));
@@ -524,10 +543,8 @@ app.get('/api/tickets/:ticketId/receipt', (req,res)=>{
 app.post('/api/tickets/:ticketId/send-email', (req,res)=>{
   const order = orders.find(o => o.ticketId === req.params.ticketId);
   if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
-  const delivery = { id:'email_' + Date.now(), ticketId:order.ticketId, orderId:order.id, to:order.email, customer:order.name, event:order.event, status:'queued_placeholder', createdAt:new Date().toISOString(), provider:process.env.EMAIL_PROVIDER || 'not_connected' };
-  emailDeliveries.unshift(delivery);
-  order.lastEmailRequestedAt = delivery.createdAt;
-  res.json({ ok:true, message:'Ticket email queued placeholder saved. Connect SMTP/provider next.', delivery, ticket:safeOrder(order), receipt:publicReceipt(order) });
+  const delivery = queueTicketEmail(order, 'customer');
+  res.json({ ok:true, message: delivery.status === 'ready_for_provider' ? 'Ticket email is ready for provider delivery.' : 'Ticket email queued placeholder saved. Connect SMTP/provider next.', delivery, ticket:safeOrder(order), receipt:publicReceipt(order) });
 });
 
 app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
@@ -564,6 +581,13 @@ app.get('/api/admin/checkin-log', (req,res)=>{
 });
 app.get('/api/admin/email-log', (req,res)=>{
   res.json({ ok:true, items:emailDeliveries });
+});
+app.post('/api/admin/tickets/:ticketId/resend-email', (req,res)=>{
+  const order = orders.find(o => o.ticketId === req.params.ticketId);
+  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
+  if(order.status !== 'paid' && order.status !== 'checked_in') return res.status(402).json({ ok:false, error:'Only paid tickets can be emailed' });
+  const delivery = queueTicketEmail(order, 'admin');
+  res.json({ ok:true, message:'Admin resend request recorded', delivery, ticket:safeOrder(order), receipt:publicReceipt(order) });
 });
 
 app.get('/api/organiser/overview', (req,res)=>{
