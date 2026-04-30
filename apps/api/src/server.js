@@ -166,7 +166,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v52-email-delivery-ops';
+const BUILD_VERSION = 'v56-qr-scanner-checkin';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -441,6 +441,36 @@ app.get('/api/orders/:orderId', (req,res)=>{
   if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
   res.json({ ok:true, order:safeOrder(order), receipt:publicReceipt(order) });
 });
+
+function extractTicketIdFromScan(input){
+  const raw = String(input || '').trim();
+  if(!raw) return '';
+  try { const parsed = JSON.parse(raw); if(parsed?.ticketId) return String(parsed.ticketId).trim(); } catch {}
+  try {
+    const url = new URL(raw);
+    const parts = url.pathname.split('/').filter(Boolean);
+    const i = parts.indexOf('ticket');
+    if(i >= 0 && parts[i+1]) return parts[i+1];
+    if(url.searchParams.get('ticketId')) return url.searchParams.get('ticketId');
+  } catch {}
+  const match = raw.match(/t_[A-Za-z0-9_-]+/);
+  return match ? match[0] : raw;
+}
+function performTicketCheckin(ticketInput, source='manual'){
+  const ticketId = extractTicketIdFromScan(ticketInput);
+  if(!ticketId){ const err = new Error('Ticket ID is required'); err.status = 400; throw err; }
+  const order = orders.find(o => o.ticketId === ticketId);
+  if(!order){ const err = new Error('Ticket not found'); err.status = 404; throw err; }
+  if(order.status !== 'paid' && order.status !== 'checked_in'){
+    const err = new Error('Ticket is not paid'); err.status = 402; err.ticket = safeOrder(order); throw err;
+  }
+  if(order.checkedInAt){ const err = new Error('Ticket already checked in'); err.status = 409; err.ticket = safeOrder(order); throw err; }
+  order.status = 'checked_in';
+  order.checkedInAt = new Date().toISOString();
+  order.checkedInSource = source;
+  return order;
+}
+
 app.get('/api/orders/:orderId/receipt', (req,res)=>{
   const order = orders.find(o => o.id === req.params.orderId) || pendingOrders.find(o => o.id === req.params.orderId);
   if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
@@ -448,14 +478,12 @@ app.get('/api/orders/:orderId/receipt', (req,res)=>{
   res.json({ ok:true, receipt:publicReceipt(order) });
 });
 app.post('/api/checkin', (req,res)=>{
-  const ticketId = req.body.ticketId;
-  if(!ticketId) return res.status(400).json({ ok:false, error:'ticketId is required' });
-  const order = orders.find(o => o.ticketId === ticketId);
-  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
-  if(order.checkedInAt) return res.status(409).json({ ok:false, error:'Ticket already checked in', ticket:safeOrder(order) });
-  order.status = 'checked_in';
-  order.checkedInAt = new Date().toISOString();
-  res.json({ ok:true, status:'checked_in', ticket:safeOrder(order) });
+  try {
+    const order = performTicketCheckin(req.body?.ticketId || req.body?.qr || req.body?.scan || req.body?.value, req.body?.source || 'scanner');
+    res.json({ ok:true, status:'checked_in', ticket:safeOrder(order), receipt:publicReceipt(order) });
+  } catch(err) {
+    res.status(err.status || 400).json({ ok:false, error:err.message, ticket:err.ticket || null });
+  }
 });
 app.post('/api/sponsorships', (req,res)=>{
   const event = events.find(e => e.id === String(req.body.eventId));
@@ -548,12 +576,12 @@ app.post('/api/tickets/:ticketId/send-email', (req,res)=>{
 });
 
 app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
-  const order = orders.find(o => o.ticketId === req.params.ticketId);
-  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
-  if(order.checkedInAt) return res.status(409).json({ ok:false, error:'Ticket already checked in', ticket:safeOrder(order) });
-  order.status = 'checked_in';
-  order.checkedInAt = new Date().toISOString();
-  res.json({ ok:true, status:'checked_in', ticket:safeOrder(order) });
+  try {
+    const order = performTicketCheckin(req.params.ticketId, req.body?.source || 'ticket_page');
+    res.json({ ok:true, status:'checked_in', ticket:safeOrder(order), receipt:publicReceipt(order) });
+  } catch(err) {
+    res.status(err.status || 400).json({ ok:false, error:err.message, ticket:err.ticket || null });
+  }
 });
 app.patch('/api/events/:id', (req,res)=>{
   const event = events.find(e => e.id === req.params.id);
