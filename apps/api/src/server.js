@@ -101,6 +101,28 @@ app.post('/api/checkout/start', async (req, res) => {
 function getPublicFrontendUrl(req){
   return (process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || req.headers.origin || 'http://localhost:3000').replace(/\/$/, '');
 }
+function safeOrder(order){
+  if(!order) return null;
+  const event = events.find(e => e.id === order.eventId);
+  return { ...order, eventDetail:event ? publicEvent(event) : null, hasQr:Boolean(order.qr), qr:order.qr || null };
+}
+async function issuePaidTicket(order, provider='manual'){
+  if(order.status === 'paid' && order.ticketId){
+    return orders.find(o => o.id === order.id) || order;
+  }
+  const event = events.find(e => e.id === order.eventId);
+  if(!event) throw new Error('Event not found');
+  const ticketId = 't_' + Date.now();
+  const paidAt = new Date().toISOString();
+  const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
+  const ticket = { ...order, ticketId, qr, status:'paid', paidAt, paymentProvider:provider };
+  Object.assign(order, { ticketId, qr, status:'paid', paidAt, paymentProvider:provider });
+  const existingIndex = orders.findIndex(o => o.id === order.id);
+  if(existingIndex >= 0) orders[existingIndex] = { ...orders[existingIndex], ...ticket };
+  else orders.unshift(ticket);
+  event.sold = (event.sold || 0) + Number(order.quantity || 1);
+  return ticket;
+}
 app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId);
   if (!order) return res.status(404).json({ ok:false, error:'Pending order not found' });
@@ -140,14 +162,8 @@ app.post('/api/payments/confirm-session/:orderId', async (req, res) => {
     const sessionId = req.body.sessionId || req.query.session_id || order.stripeSessionId;
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.payment_status !== 'paid') return res.status(402).json({ ok:false, error:'Payment is not complete yet', payment_status:session.payment_status });
-    if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:order });
-    const ticketId = 't_' + Date.now();
-    const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
-    const ticket = { ...order, ticketId, qr, status:'paid', paidAt:new Date().toISOString(), paymentProvider:'stripe' };
-    order.status = 'paid'; order.ticketId = ticketId; order.qr = qr; order.paidAt = ticket.paidAt; order.paymentProvider = 'stripe';
-    orders.unshift(ticket);
-    event.sold = (event.sold || 0) + Number(order.quantity || 1);
-    res.json({ ok:true, ticket });
+    const ticket = await issuePaidTicket(order, 'stripe');
+    res.json({ ok:true, ticket:safeOrder(ticket) });
   } catch (err) {
     console.error('Stripe confirm error', err);
     res.status(500).json({ ok:false, error:'Stripe payment confirmation failed', details:String(err.message || err) });
@@ -156,29 +172,36 @@ app.post('/api/payments/confirm-session/:orderId', async (req, res) => {
 app.post('/api/payments/demo-complete/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId);
   if (!order) return res.status(404).json({ ok:false, error:'Pending order not found' });
-  if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:order });
   const event = events.find(e => e.id === order.eventId);
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
-  const ticketId = 't_' + Date.now();
-  const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
-  const ticket = { ...order, ticketId, qr, status:'paid', paidAt:new Date().toISOString() };
-  order.status = 'paid'; order.ticketId = ticketId; order.qr = qr; order.paidAt = ticket.paidAt;
-  orders.unshift(ticket);
-  event.sold = (event.sold || 0) + Number(order.quantity || 1);
-  res.json({ ok:true, ticket });
+  const ticket = await issuePaidTicket(order, 'test');
+  res.json({ ok:true, ticket:safeOrder(ticket) });
 });
 
 app.post('/api/orders', async (req, res) => {
   const event = events.find(e => e.id === String(req.body.eventId));
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
-  const ticketId = 't_' + Date.now();
-  const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, eventId:event.id, name:req.body.name || 'Guest' }));
-  const order = { id:'ord_' + Date.now(), ticketId, eventId:event.id, event:event.title, name:req.body.name, email:req.body.email, status:'paid_legacy', qr, createdAt:new Date().toISOString() };
-  orders.unshift(order); event.sold = (event.sold || 0) + 1;
-  res.status(201).json({ ok:true, order });
+  const quantity = Math.max(1, Number(req.body.quantity || 1));
+  const order = { id:'ord_' + Date.now(), eventId:event.id, event:event.title, name:req.body.name, email:req.body.email, quantity, amountMinor:(event.priceMinor || 0) * quantity, status:'pending_payment', createdAt:new Date().toISOString(), source:'legacy_order_endpoint' };
+  pendingOrders.unshift(order);
+  res.status(201).json({ ok:true, order:safeOrder(order), checkoutUrl:'/payment/' + order.id, paymentRequired:true, message:'Order reserved. Complete payment before ticket/QR is created.' });
 });
-app.get('/api/orders', (req,res)=>res.json({ ok:true, items:orders }));
-app.post('/api/checkin', (req,res)=>res.json({ ok:true, status:'checked_in', ticketId:req.body.ticketId || 'demo-ticket', checkedAt:new Date().toISOString() }));
+app.get('/api/orders', (req,res)=>res.json({ ok:true, items:orders.map(safeOrder) }));
+app.get('/api/orders/:orderId', (req,res)=>{
+  const order = orders.find(o => o.id === req.params.orderId) || pendingOrders.find(o => o.id === req.params.orderId);
+  if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  res.json({ ok:true, order:safeOrder(order) });
+});
+app.post('/api/checkin', (req,res)=>{
+  const ticketId = req.body.ticketId;
+  if(!ticketId) return res.status(400).json({ ok:false, error:'ticketId is required' });
+  const order = orders.find(o => o.ticketId === ticketId);
+  if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
+  if(order.checkedInAt) return res.status(409).json({ ok:false, error:'Ticket already checked in', ticket:safeOrder(order) });
+  order.status = 'checked_in';
+  order.checkedInAt = new Date().toISOString();
+  res.json({ ok:true, status:'checked_in', ticket:safeOrder(order) });
+});
 app.post('/api/sponsorships', (req,res)=>{
   const event = events.find(e => e.id === String(req.body.eventId));
   const budgetMinor = Number(String(req.body.budget || '0').replace(/[^0-9]/g,'')) * 100;
@@ -242,15 +265,15 @@ app.get('/api/tickets/:ticketId', (req,res)=>{
   const order = orders.find(o => o.ticketId === req.params.ticketId);
   if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
   const event = events.find(e => e.id === order.eventId);
-  res.json({ ok:true, ticket:{ ...order, eventDetail:event ? publicEvent(event) : null } });
+  res.json({ ok:true, ticket:safeOrder(order) });
 });
 app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
   const order = orders.find(o => o.ticketId === req.params.ticketId);
   if(!order) return res.status(404).json({ ok:false, error:'Ticket not found' });
-  if(order.checkedInAt) return res.status(409).json({ ok:false, error:'Ticket already checked in', ticket:order });
+  if(order.checkedInAt) return res.status(409).json({ ok:false, error:'Ticket already checked in', ticket:safeOrder(order) });
   order.status = 'checked_in';
   order.checkedInAt = new Date().toISOString();
-  res.json({ ok:true, status:'checked_in', ticket:order });
+  res.json({ ok:true, status:'checked_in', ticket:safeOrder(order) });
 });
 app.patch('/api/events/:id', (req,res)=>{
   const event = events.find(e => e.id === req.params.id);
@@ -271,7 +294,7 @@ app.patch('/api/admin/events/:id/reject', (req,res)=>{
   res.json({ ok:true, item:publicEvent(event) });
 });
 app.get('/api/admin/orders', (req,res)=>{
-  res.json({ ok:true, items:orders.map(o => ({ ...o, eventDetail:events.find(e=>e.id===o.eventId)?.title || o.event })) });
+  res.json({ ok:true, items:orders.map(o => ({ ...safeOrder(o), eventTitle:events.find(e=>e.id===o.eventId)?.title || o.event })) });
 });
 
 app.get('/api/organiser/overview', (req,res)=>{
