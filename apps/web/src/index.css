@@ -41,3 +41,4 @@
 .ticket-result{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px;border:1px solid #eee;border-radius:14px;background:#fff}
 .ticket-result img{grid-column:1 / -1;width:120px;border-radius:10px;background:#f4e9ff;padding:8px}
 .auth-card .auth-logo{color:#4b0b78;font-size:25px;font-weight:900;text-decoration:none;display:block;margin-bottom:38px}
+.qr-ticket-result img{width:110px;height:110px;border-radius:14px}.auth-success,.success-note{background:#f3e8ff;border:1px solid #ead5ff;color:#4b0b78;border-radius:14px;padding:12px;margin:12px 0}.ticket-result img{width:90px;height:90px}

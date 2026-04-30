@@ -33,7 +33,7 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v20-auth-ticket-api-polish' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v21-real-checkout-builder' }));
 app.get('/api/events', (req, res) => {
   const { q='', city='', status='' } = req.query;
   let items = events;
@@ -116,5 +116,24 @@ app.get('/api/me/tickets', (req,res)=>{
 app.get('/api/categories', (req,res)=>res.json({ ok:true, items:categoryList }));
 app.get('/api/cities', (req,res)=>res.json({ ok:true, items:cityList }));
 app.get('/api/help/articles', (req,res)=>res.json({ ok:true, items:helpArticles }));
+
+
+// v21: organiser stats, promo code validation and order check-in improvements
+let promoCodes = [
+  { code:'LOCAL10', type:'percent', amount:10, active:true },
+  { code:'DESI5', type:'fixed', amountMinor:500, active:true }
+];
+app.get('/api/organiser/overview', (req,res)=>{
+  const totalSold = events.reduce((sum,e)=>sum+(e.sold||0),0);
+  const revenueMinor = events.reduce((sum,e)=>sum+(e.sold||0)*(e.priceMinor||0),0);
+  res.json({ ok:true, data:{ ticketsSold:totalSold, revenueMinor, revenue:money(revenueMinor), sponsorLeads:sponsorships.length, draftEvents:events.filter(e=>e.status==='pending').length, liveEvents:events.filter(e=>e.status==='published').length } });
+});
+app.get('/api/organiser/events', (req,res)=>res.json({ ok:true, items:events.map(publicEvent) }));
+app.post('/api/promo/validate', (req,res)=>{
+  const code = String(req.body.code||'').trim().toUpperCase();
+  const promo = promoCodes.find(p=>p.code===code && p.active);
+  if(!promo) return res.status(404).json({ ok:false, error:'Promo code not found' });
+  res.json({ ok:true, promo });
+});
 
 app.listen(port, () => console.log(`API running on ${port}`));
