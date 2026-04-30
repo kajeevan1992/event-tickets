@@ -166,7 +166,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v57-attendee-ops-export';
+const BUILD_VERSION = 'v58-organiser-event-management';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -492,8 +492,24 @@ app.post('/api/sponsorships', (req,res)=>{
   sponsorships.unshift(item); res.status(201).json({ ok:true, item });
 });
 app.get('/api/admin/sponsorships', (req,res)=>res.json({ ok:true, items:sponsorships.map(s=>({ ...s, budget:money(s.budgetMinor) })) }));
+app.get('/api/admin/events', (req,res)=>{
+  const status = req.query.status || '';
+  const q = req.query.q || '';
+  let items = [...events];
+  if(status) items = items.filter(e => e.status === status);
+  if(q){ const search = String(q).toLowerCase(); items = items.filter(e => [e.title,e.city,e.venue,e.organiser,e.category,e.vibe,e.status].join(' ').toLowerCase().includes(search)); }
+  const counts = items.reduce((acc,e)=>{ const k=e.status || 'draft'; acc[k]=(acc[k]||0)+1; return acc; },{});
+  res.json({ ok:true, count:items.length, counts, items:items.map(publicEvent) });
+});
+app.post('/api/admin/events/:id/clone', (req,res)=>{
+  const event = events.find(e => e.id === req.params.id);
+  if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  const cloned = { ...event, id:String(Date.now()), title:String(event.title || 'Event') + ' Copy', status:'pending', sold:0, approvedAt:null, clonedFrom:event.id };
+  events.unshift(cloned);
+  res.status(201).json({ ok:true, item:publicEvent(cloned) });
+});
 app.patch('/api/admin/sponsorships/:id', (req,res)=>{ const s=sponsorships.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({ok:false}); Object.assign(s,req.body); res.json({ok:true,item:s}); });
-app.patch('/api/admin/events/:id/approve', (req,res)=>{ const e=events.find(x=>x.id===req.params.id); if(!e)return res.status(404).json({ok:false}); e.status='published'; res.json({ok:true,item:publicEvent(e)}); });
+app.patch('/api/admin/events/:id/approve', (req,res)=>{ const e=events.find(x=>x.id===req.params.id); if(!e)return res.status(404).json({ok:false,error:'Event not found'}); e.status='published'; e.approvedAt=new Date().toISOString(); res.json({ok:true,item:publicEvent(e)}); });
 function adminOrderList(){
   const all = [...orders, ...pendingOrders.filter(p => !orders.some(o => o.id === p.id))];
   return all.map(o => ({ ...safeOrder(o), eventTitle:events.find(e=>e.id===o.eventId)?.title || o.event, amount:money(o.amountMinor), createdAt:o.createdAt, paidAt:o.paidAt || null, checkedInAt:o.checkedInAt || null }));
