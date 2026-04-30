@@ -20,15 +20,19 @@ app.post(['/api/stripe/webhook','/api/webhooks/stripe'], express.raw({ type:'app
     const stripe = new Stripe(key);
     const sig = req.headers['stripe-signature'];
     const eventPayload = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-    const session = eventPayload.data?.object || {};
-    const orderId = session.metadata?.orderId;
+    const stripeObject = eventPayload.data?.object || {};
+    const orderId = stripeObject.metadata?.orderId;
     const order = pendingOrders.find(o => o.id === orderId) || orders.find(o => o.id === orderId);
-    if (eventPayload.type === 'checkout.session.completed' && order && session.payment_status === 'paid') {
-      order.stripeSessionId = session.id || order.stripeSessionId;
-      order.stripePaymentIntentId = session.payment_intent || order.stripePaymentIntentId;
+    if (eventPayload.type === 'checkout.session.completed' && order && stripeObject.payment_status === 'paid') {
+      order.stripeSessionId = stripeObject.id || order.stripeSessionId;
+      order.stripePaymentIntentId = stripeObject.payment_intent || order.stripePaymentIntentId;
       await issuePaidTicket(order, 'stripe_webhook');
     }
-    if ((eventPayload.type === 'checkout.session.expired' || eventPayload.type === 'checkout.session.async_payment_failed') && order && order.status !== 'paid') {
+    if (eventPayload.type === 'payment_intent.succeeded' && order && stripeObject.status === 'succeeded') {
+      order.stripePaymentIntentId = stripeObject.id || order.stripePaymentIntentId;
+      await issuePaidTicket(order, 'stripe_payment_element_webhook');
+    }
+    if ((eventPayload.type === 'checkout.session.expired' || eventPayload.type === 'checkout.session.async_payment_failed' || eventPayload.type === 'payment_intent.payment_failed') && order && order.status !== 'paid') {
       order.status = eventPayload.type === 'checkout.session.expired' ? 'cancelled' : 'failed';
       order.failedAt = new Date().toISOString();
     }
@@ -118,7 +122,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v48-stripe-test-keys-wired';
+const BUILD_VERSION = 'v49-stripe-payment-element';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -210,6 +214,57 @@ async function issuePaidTicket(order, provider='manual'){
   }
   return orders.find(o => o.id === order.id) || ticket;
 }
+
+app.post('/api/payments/create-payment-intent/:orderId', async (req, res) => {
+  const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
+  if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if (order.status === 'paid') return res.json({ ok:true, alreadyPaid:true, order:safeOrder(order) });
+  if (['cancelled','failed','expired'].includes(order.status)) return res.status(409).json({ ok:false, error:'Order is no longer payable', order:safeOrder(order) });
+  let event;
+  try { event = assertCapacityAvailable(order); } catch(err) { return res.status(err.status || 400).json({ ok:false, error:err.message, remaining:err.remaining, order:safeOrder(order) }); }
+  if ((order.amountMinor || 0) <= 0) return res.json({ ok:true, paymentRequired:false, message:'This is a free order. Complete free ticket after confirmation.', order:safeOrder(order) });
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (!key.startsWith('sk_')) return res.status(400).json({ ok:false, error:'Stripe key is not configured on API', order:safeOrder(order) });
+  try {
+    const stripe = new Stripe(key);
+    const intent = await stripe.paymentIntents.create({
+      amount: Number(order.amountMinor || 0),
+      currency: process.env.CURRENCY || 'gbp',
+      automatic_payment_methods: { enabled: true },
+      receipt_email: order.email || undefined,
+      metadata: { orderId: order.id, eventId: event.id },
+      description: (event.title || order.event || 'LocalVibe ticket') + ' x ' + (order.quantity || 1)
+    });
+    order.stripePaymentIntentId = intent.id;
+    order.paymentProvider = 'stripe_payment_element';
+    res.json({ ok:true, stripeEnabled:true, clientSecret:intent.client_secret, paymentIntentId:intent.id, order:safeOrder(order) });
+  } catch (err) {
+    console.error('Stripe payment intent error', err);
+    res.status(500).json({ ok:false, error:'Stripe payment intent could not be created', details:String(err.message || err) });
+  }
+});
+
+app.post('/api/payments/confirm-payment-intent/:orderId', async (req, res) => {
+  const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);
+  if (!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:safeOrder(order), alreadyPaid:true });
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (!key.startsWith('sk_')) return res.status(400).json({ ok:false, error:'Stripe is not configured on API' });
+  const paymentIntentId = req.body.paymentIntentId || order.stripePaymentIntentId;
+  if (!paymentIntentId) return res.status(400).json({ ok:false, error:'paymentIntentId is required' });
+  try {
+    const stripe = new Stripe(key);
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (intent.metadata?.orderId && intent.metadata.orderId !== order.id) return res.status(409).json({ ok:false, error:'Stripe payment intent does not match this order' });
+    if (intent.status !== 'succeeded') return res.status(402).json({ ok:false, error:'Payment is not complete yet', payment_status:intent.status });
+    order.stripePaymentIntentId = intent.id || order.stripePaymentIntentId;
+    const ticket = await issuePaidTicket(order, 'stripe_payment_element');
+    res.json({ ok:true, ticket:safeOrder(ticket) });
+  } catch (err) {
+    console.error('Stripe payment intent confirm error', err);
+    res.status(500).json({ ok:false, error:'Stripe payment confirmation failed', details:String(err.message || err) });
+  }
+});
 
 app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId) || orders.find(o => o.id === req.params.orderId);

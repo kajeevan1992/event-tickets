@@ -47,3 +47,9 @@
 .api-note{max-width:1370px;margin:14px auto;padding:12px 18px;border:1px solid #e8def0;background:#fff;color:#4b0b78;border-radius:14px;font-weight:700;font-size:13px}.browse-head select,.filter-dock select,.filter-dock .filter-search{border:0;background:#fff;border-radius:999px;padding:10px 16px;font-weight:900;color:#4b0b78;box-shadow:0 1px 0 #eee;outline:none}.top-pop p{cursor:pointer}.filter-dock button.active,.time-options button.active{background:#4b0b78!important;color:#fff!important}.small-card{padding:0 0 14px;transition:transform .18s ease,box-shadow .18s ease}.small-card:hover{transform:translateY(-3px);box-shadow:0 18px 38px rgba(75,11,120,.12)}.small-body{padding:12px 16px 18px}.small-card h3,.small-card p,.small-card b,.small-card em{transform:none!important;margin-left:0!important}.event-row-carousel .car-arrow.left{left:-36px}.event-row-carousel .car-arrow.right{right:-36px}
 /* v43 payment polish */
 .payment-box .secondary-action{margin-top:12px;background:#fff;color:#4b0b78;border:1px solid rgba(75,11,120,.25);box-shadow:none}.payment-box .secondary-action:hover{background:#f7f1fb;border-color:#4b0b78}
+
+/* v49 Stripe Payment Element */
+.inline-stripe-form{display:grid;gap:14px;margin-top:14px}
+.inline-stripe-form button{width:100%}
+.inline-stripe-form small{color:#6b7280;line-height:1.45}
+.payment-box h3{display:flex;align-items:center;gap:8px}
