@@ -1,0 +1,12 @@
+{
+  "name": "desi-events-platform-v1",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/web", "apps/api"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
+    "start": "npm run start -w apps/api"
+  },
+  "devDependencies": { "concurrently": "^8.2.2" }
+}
