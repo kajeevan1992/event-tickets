@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import QRCode from 'qrcode';
+import Stripe from 'stripe';
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -95,6 +96,62 @@ app.post('/api/checkout/start', async (req, res) => {
   const order = { id:'ord_' + Date.now(), eventId:event.id, event:event.title, name:req.body.name, email:req.body.email, quantity, amountMinor, status:'pending_payment', createdAt:new Date().toISOString() };
   pendingOrders.unshift(order);
   res.status(201).json({ ok:true, order, checkoutUrl:'/payment/' + order.id, paymentRequired:true });
+});
+// v43: Stripe Checkout foundation. Tickets are issued only after payment confirmation.
+function getPublicFrontendUrl(req){
+  return (process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || req.headers.origin || 'http://localhost:3000').replace(/\/$/, '');
+}
+app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
+  const order = pendingOrders.find(o => o.id === req.params.orderId);
+  if (!order) return res.status(404).json({ ok:false, error:'Pending order not found' });
+  const event = events.find(e => e.id === order.eventId);
+  if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (!key.startsWith('sk_')) return res.json({ ok:true, stripeEnabled:false, message:'Stripe key is not configured. Use test payment only.', order });
+  try {
+    const stripe = new Stripe(key);
+    const frontend = getPublicFrontendUrl(req);
+    const session = await stripe.checkout.sessions.create({
+      mode:'payment',
+      payment_method_types:['card'],
+      customer_email:order.email || undefined,
+      line_items:[{ price_data:{ currency:'gbp', product_data:{ name:event.title || order.event || 'LocalVibe ticket' }, unit_amount:event.priceMinor || 0 }, quantity:order.quantity || 1 }],
+      metadata:{ orderId:order.id, eventId:event.id },
+      success_url:`${frontend}/payment/${order.id}?stripe=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url:`${frontend}/payment/${order.id}?stripe=cancelled`
+    });
+    order.stripeSessionId = session.id;
+    order.paymentProvider = 'stripe';
+    res.json({ ok:true, stripeEnabled:true, checkoutUrl:session.url, sessionId:session.id });
+  } catch (err) {
+    console.error('Stripe checkout error', err);
+    res.status(500).json({ ok:false, error:'Stripe checkout could not be created', details:String(err.message || err) });
+  }
+});
+app.post('/api/payments/confirm-session/:orderId', async (req, res) => {
+  const order = pendingOrders.find(o => o.id === req.params.orderId);
+  if (!order) return res.status(404).json({ ok:false, error:'Pending order not found' });
+  const event = events.find(e => e.id === order.eventId);
+  if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (!key.startsWith('sk_')) return res.status(400).json({ ok:false, error:'Stripe is not configured on API' });
+  try {
+    const stripe = new Stripe(key);
+    const sessionId = req.body.sessionId || req.query.session_id || order.stripeSessionId;
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status !== 'paid') return res.status(402).json({ ok:false, error:'Payment is not complete yet', payment_status:session.payment_status });
+    if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:order });
+    const ticketId = 't_' + Date.now();
+    const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
+    const ticket = { ...order, ticketId, qr, status:'paid', paidAt:new Date().toISOString(), paymentProvider:'stripe' };
+    order.status = 'paid'; order.ticketId = ticketId; order.qr = qr; order.paidAt = ticket.paidAt; order.paymentProvider = 'stripe';
+    orders.unshift(ticket);
+    event.sold = (event.sold || 0) + Number(order.quantity || 1);
+    res.json({ ok:true, ticket });
+  } catch (err) {
+    console.error('Stripe confirm error', err);
+    res.status(500).json({ ok:false, error:'Stripe payment confirmation failed', details:String(err.message || err) });
+  }
 });
 app.post('/api/payments/demo-complete/:orderId', async (req, res) => {
   const order = pendingOrders.find(o => o.id === req.params.orderId);
