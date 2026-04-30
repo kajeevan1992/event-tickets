@@ -7,22 +7,9 @@ import QRCode from 'qrcode';
 const app = express();
 const port = process.env.PORT || 4000;
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+app.use(cors({ origin: true, credentials: false }));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
-
-
-// Root health routes for Coolify/browser checks.
-// These are intentionally outside /api so direct visits to the backend URL work:
-//   /        -> API status
-//   /health  -> health status
-app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'LocalVibe API', status: 'running', version: 'v39-root-health-fix' });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'LocalVibe API', status: 'healthy', version: 'v39-root-health-fix' });
-});
 
 let events = [
   { id:'1', title:'Bollywood Rooftop Night', city:'London', status:'published', priceMinor:1200, date:'Fri 8 May', time:'8:00 PM', category:'Desi Night', vibe:'Bollywood', boost:'Hidden Gem', organiser:'Rooftop Desi Collective', capacity:250, sold:128, image:'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?auto=format&fit=crop&w=1200&q=80', desc:'A local-first rooftop night with DJs, food and community energy.' },
@@ -61,28 +48,39 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v37-payment-gated-checkout' }));
-app.get('/api/events', (req, res) => {
-  const { q='', city='', status='', category='', when='' } = req.query;
+app.get('/', (req, res) => res.json({ ok:true, service:'LocalVibe API', message:'API is running', endpoints:['/health','/api/health','/api/events','/events'] }));
+app.get('/health', (req, res) => res.json({ ok:true, status:'healthy', service:'LocalVibe API' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, status:'healthy', service:'desi-events-api', version:'v39-api-connection-fix' }));
+function listEventsHandler(req, res) {
+  const { q='', search='', city='', location='', status='', category='', when='', date='' } = req.query;
+  const query = q || search;
+  const selectedCity = city || location;
+  const selectedWhen = when || date;
   let items = [...events];
   if (status) items = items.filter(e => e.status === status);
-  if (city) items = items.filter(e => String(e.city || '').toLowerCase().includes(String(city).toLowerCase()));
+  if (selectedCity) items = items.filter(e => String(e.city || '').toLowerCase().includes(String(selectedCity).toLowerCase()));
   if (category && category !== 'All') items = items.filter(e => [e.category,e.vibe,e.boost].join(' ').toLowerCase().includes(String(category).toLowerCase()));
-  if (q) {
-    const s = String(q).toLowerCase();
+  if (query) {
+    const s = String(query).toLowerCase();
     items = items.filter(e => [e.title,e.city,e.category,e.vibe,e.organiser,e.desc,e.venue].join(' ').toLowerCase().includes(s));
   }
-  if (when === 'today') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('today') || i % 4 === 0);
-  if (when === 'tomorrow') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('tomorrow') || i % 4 === 1);
-  if (when === 'weekend') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('sat') || String(e.date||'').toLowerCase().includes('sun') || i % 2 === 0);
-  if (when === 'month') items = items.slice(0, 24);
-  res.json({ ok:true, count:items.length, filters:{ q, city, status, category, when }, items:items.map(publicEvent) });
-});
-app.get('/api/events/:id', (req, res) => {
+  if (selectedWhen === 'today') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('today') || i % 4 === 0);
+  if (selectedWhen === 'tomorrow') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('tomorrow') || i % 4 === 1);
+  if (selectedWhen === 'weekend') items = items.filter((e,i)=>String(e.date||'').toLowerCase().includes('sat') || String(e.date||'').toLowerCase().includes('sun') || String(e.date||'').toLowerCase().includes('weekend') || i % 2 === 0);
+  if (selectedWhen === 'month') items = items.slice(0, 24);
+  const publicItems = items.map(publicEvent);
+  res.json({ ok:true, count:publicItems.length, filters:{ q:query, city:selectedCity, status, category, when:selectedWhen }, items:publicItems, events:publicItems });
+}
+app.get('/api/events', listEventsHandler);
+app.get('/events', listEventsHandler);
+function eventDetailHandler(req, res) {
   const item = events.find(e => e.id === req.params.id);
   if (!item) return res.status(404).json({ ok:false, error:'Event not found' });
-  res.json({ ok:true, item:publicEvent(item) });
-});
+  const publicItem = publicEvent(item);
+  res.json({ ok:true, item:publicItem, event:publicItem });
+}
+app.get('/api/events/:id', eventDetailHandler);
+app.get('/events/:id', eventDetailHandler);
 app.post('/api/events', (req, res) => {
   const item = { id:String(Date.now()), status:'pending', priceMinor:Number(req.body.priceMinor || 0), capacity:Number(req.body.capacity || 100), sold:0, boost:'New Organiser', image:'https://images.unsplash.com/photo-1528605248644-14dd04022da1?auto=format&fit=crop&w=1200&q=80', ...req.body };
   events.unshift(item);
