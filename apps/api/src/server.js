@@ -21,11 +21,19 @@ let sponsorships = [
   { id:'sp_2', company:'Urban Chai Co', eventId:'1', event:'Bollywood Rooftop Night', budgetMinor:120000, status:'in_discussion', name:'Amir', email:'hello@example.com', message:'Would like drink sampling and social media mentions.' }
 ];
 let orders = [];
+let salesLeads = [];
+let updates = [
+  { date:'Apr 17, 2026', title:'New organiser profile page', body:'Your public profile now shows images, socials, upcoming events and trust badges.' },
+  { date:'Apr 14, 2026', title:'Top organiser badge', body:'Creators who consistently run quality events earn a badge across their profile and listings.' },
+  { date:'Apr 7, 2026', title:'Sharper event images', body:'Event cards now display stronger images across all listing areas.' },
+  { date:'Apr 2, 2026', title:'Event flyer tool', body:'Generate shareable flyers for community channels and WhatsApp groups.' },
+  { date:'Apr 1, 2026', title:'Save to Apple or Google Wallet', body:'Tickets can be saved directly into a mobile wallet.' }
+];
 
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v3-growth-ui' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v19-api-connected-pages' }));
 app.get('/api/events', (req, res) => {
   const { q='', city='', status='' } = req.query;
   let items = events;
@@ -68,4 +76,13 @@ app.get('/api/admin/sponsorships', (req,res)=>res.json({ ok:true, items:sponsors
 app.patch('/api/admin/sponsorships/:id', (req,res)=>{ const s=sponsorships.find(x=>x.id===req.params.id); if(!s)return res.status(404).json({ok:false}); Object.assign(s,req.body); res.json({ok:true,item:s}); });
 app.patch('/api/admin/events/:id/approve', (req,res)=>{ const e=events.find(x=>x.id===req.params.id); if(!e)return res.status(404).json({ok:false}); e.status='published'; res.json({ok:true,item:publicEvent(e)}); });
 app.get('/api/admin/overview', (req,res)=>res.json({ ok:true, data:{ pendingEvents:events.filter(e=>e.status==='pending').length, activeEvents:events.filter(e=>e.status==='published').length, sponsorEnquiries:sponsorships.length, orders:orders.length, revenueMinor:orders.reduce((sum,o)=>sum+(events.find(e=>e.id===o.eventId)?.priceMinor||0),1800000) } }));
+
+app.get('/api/updates', (req,res)=>res.json({ ok:true, items:updates }));
+app.post('/api/contact-sales', (req,res)=>{
+  const item = { id:'lead_' + Date.now(), status:'new', createdAt:new Date().toISOString(), ...req.body };
+  salesLeads.unshift(item);
+  res.status(201).json({ ok:true, item });
+});
+app.get('/api/admin/contact-sales', (req,res)=>res.json({ ok:true, items:salesLeads }));
+
 app.listen(port, () => console.log(`API running on ${port}`));
