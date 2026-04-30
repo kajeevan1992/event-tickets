@@ -35,6 +35,7 @@ let sponsorships = [
   { id:'sp_2', company:'Urban Chai Co', eventId:'1', event:'Bollywood Rooftop Night', budgetMinor:120000, status:'in_discussion', name:'Amir', email:'hello@example.com', message:'Would like drink sampling and social media mentions.' }
 ];
 let orders = [];
+let pendingOrders = [];
 let salesLeads = [];
 let updates = [
   { date:'Apr 17, 2026', title:'New organiser profile page', body:'Your public profile now shows images, socials, upcoming events and trust badges.' },
@@ -47,7 +48,7 @@ let updates = [
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
 const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
 
-app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v31-ticket-checkin-admin-foundation' }));
+app.get('/api/health', (req, res) => res.json({ ok:true, service:'desi-events-api', version:'v37-payment-gated-checkout' }));
 app.get('/api/events', (req, res) => {
   const { q='', city='', status='', category='', when='' } = req.query;
   let items = [...events];
@@ -74,12 +75,37 @@ app.post('/api/events', (req, res) => {
   events.unshift(item);
   res.status(201).json({ ok:true, item:publicEvent(item) });
 });
+
+app.post('/api/checkout/start', async (req, res) => {
+  const event = events.find(e => e.id === String(req.body.eventId));
+  if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  const quantity = Math.max(1, Number(req.body.quantity || 1));
+  const amountMinor = (event.priceMinor || 0) * quantity;
+  const order = { id:'ord_' + Date.now(), eventId:event.id, event:event.title, name:req.body.name, email:req.body.email, quantity, amountMinor, status:'pending_payment', createdAt:new Date().toISOString() };
+  pendingOrders.unshift(order);
+  res.status(201).json({ ok:true, order, checkoutUrl:'/payment/' + order.id, paymentRequired:true });
+});
+app.post('/api/payments/demo-complete/:orderId', async (req, res) => {
+  const order = pendingOrders.find(o => o.id === req.params.orderId);
+  if (!order) return res.status(404).json({ ok:false, error:'Pending order not found' });
+  if (order.status === 'paid' && order.ticketId) return res.json({ ok:true, ticket:order });
+  const event = events.find(e => e.id === order.eventId);
+  if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  const ticketId = 't_' + Date.now();
+  const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, orderId:order.id, eventId:event.id, name:order.name, status:'valid' }));
+  const ticket = { ...order, ticketId, qr, status:'paid', paidAt:new Date().toISOString() };
+  order.status = 'paid'; order.ticketId = ticketId; order.qr = qr; order.paidAt = ticket.paidAt;
+  orders.unshift(ticket);
+  event.sold = (event.sold || 0) + Number(order.quantity || 1);
+  res.json({ ok:true, ticket });
+});
+
 app.post('/api/orders', async (req, res) => {
   const event = events.find(e => e.id === String(req.body.eventId));
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
   const ticketId = 't_' + Date.now();
   const qr = await QRCode.toDataURL(JSON.stringify({ ticketId, eventId:event.id, name:req.body.name || 'Guest' }));
-  const order = { id:'ord_' + Date.now(), ticketId, eventId:event.id, event:event.title, name:req.body.name, email:req.body.email, status:'paid_placeholder', qr, createdAt:new Date().toISOString() };
+  const order = { id:'ord_' + Date.now(), ticketId, eventId:event.id, event:event.title, name:req.body.name, email:req.body.email, status:'paid_legacy', qr, createdAt:new Date().toISOString() };
   orders.unshift(order); event.sold = (event.sold || 0) + 1;
   res.status(201).json({ ok:true, order });
 });
