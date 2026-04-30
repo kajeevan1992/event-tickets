@@ -54,3 +54,9 @@ Both frontend and backend include `.nvmrc` for Node 22.12.
 - Kept main brand colour locked to #4b0b78.
 - Added hover effects for event cards, category icons, city pills, help cards and footer links.
 - Polished search button spacing, hero text spacing, footer legal alignment and country selector styling.
+
+## v18 - Organiser event builder
+- Added `/organiser/create` step-by-step event builder UI.
+- Added ticket, promotion, sponsorship and review stages.
+- Added live event card preview and launch checklist.
+- Frontend-only UI build; database save can be wired in the next backend build.
