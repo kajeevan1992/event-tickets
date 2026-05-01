@@ -1,0 +1,128 @@
+/* LocalVibe v82 production UI polish — Eventbrite-inspired, original styling */
+:root{
+  --lv-bg:#f7f7fb;
+  --lv-surface:#ffffff;
+  --lv-ink:#171321;
+  --lv-muted:#686273;
+  --lv-border:#ebe7f1;
+  --lv-brand:#6d2ee8;
+  --lv-brand-dark:#4b0b78;
+  --lv-hot:#f05537;
+  --lv-soft:#f3efff;
+  --lv-shadow:0 18px 50px rgba(31,15,56,.10);
+  --lv-shadow-hover:0 26px 70px rgba(31,15,56,.18);
+}
+
+html{scroll-behavior:smooth;}
+body{background:var(--lv-bg);color:var(--lv-ink);-webkit-font-smoothing:antialiased;}
+
+/* Header */
+.topbar,.topbar-v9{
+  backdrop-filter:blur(18px);
+  background:rgba(255,255,255,.92)!important;
+  border-bottom:1px solid rgba(235,231,241,.92)!important;
+  box-shadow:0 8px 30px rgba(31,15,56,.045);
+}
+.brand a,.centered-brand a{font-weight:950!important;letter-spacing:-.055em!important;color:var(--lv-brand)!important;}
+.topnav a{border-radius:999px;padding:9px 10px;transition:.18s ease;color:#342a45;}
+.topnav a:hover{background:var(--lv-soft);color:var(--lv-brand);transform:translateY(-1px);}
+.top-search{background:#f4f2f8!important;border:1px solid #ece8f2!important;box-shadow:inset 0 1px 0 #fff;}
+.top-search:focus-within{background:#fff!important;border-color:#d5c6ff!important;box-shadow:0 0 0 4px rgba(109,46,232,.10)!important;}
+.top-search button{transition:.18s ease;}
+.top-search button:hover{transform:scale(1.04);box-shadow:0 10px 24px rgba(109,46,232,.28);}
+
+/* Hero */
+.eb-hero,.find-hero,.create-hero,.sales-hero{
+  box-shadow:var(--lv-shadow);
+}
+.eb-hero{border-radius:22px!important;overflow:hidden!important;}
+.hero-copy{text-align:left!important;left:90px!important;max-width:560px!important;}
+.hero-copy span{border-radius:999px!important;background:rgba(255,255,255,.90)!important;color:var(--lv-brand-dark)!important;box-shadow:0 10px 30px rgba(0,0,0,.12);}
+.hero-copy h1{font-size:clamp(38px,5vw,72px)!important;line-height:.94!important;letter-spacing:-.075em!important;}
+.hero-copy mark{border-radius:12px;background:linear-gradient(135deg,#fff,#efe9ff)!important;color:#171321!important;box-decoration-break:clone;-webkit-box-decoration-break:clone;}
+.hero-copy h1 mark+br+mark{background:linear-gradient(135deg,#ffefe8,#ffd4c7)!important;}
+.hero-copy a,.create-hero a,.updates-feature a,.question-block a{
+  background:var(--lv-brand)!important;color:#fff!important;border-radius:999px!important;padding:14px 24px!important;box-shadow:0 16px 35px rgba(109,46,232,.24);transition:.18s ease;
+}
+.hero-copy a:hover,.create-hero a:hover,.updates-feature a:hover,.question-block a:hover{transform:translateY(-2px);box-shadow:0 22px 48px rgba(109,46,232,.30);}
+
+/* Cards */
+.small-card,.event-card,.dest-card,.panel,.stat,.ticket-card,.detail-main,.checkout-card,.organiser-strip article,.tool-grid article,.auth-card,.side-menu{
+  border:1px solid var(--lv-border)!important;
+  box-shadow:var(--lv-shadow)!important;
+}
+.small-card,.event-card{background:#fff!important;border-radius:18px!important;overflow:hidden!important;padding:0!important;transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease;}
+.small-card:hover,.event-card:hover{transform:translateY(-6px)!important;box-shadow:var(--lv-shadow-hover)!important;border-color:#d9ceff!important;}
+.small-card img,.event-card img{border-radius:0!important;height:172px!important;transition:transform .28s ease;}
+.small-card:hover img,.event-card:hover img{transform:scale(1.035);}
+.small-body,.card-body{padding:14px 15px 16px!important;}
+.small-card h3,.event-card h3{font-size:18px!important;letter-spacing:-.025em!important;margin:7px 0!important;}
+.small-card p,.event-card p{color:var(--lv-muted)!important;line-height:1.35;}
+.tag{border-radius:999px!important;background:#f0eaff!important;color:var(--lv-brand-dark)!important;}
+.tag.blue{background:#e7f0ff!important;color:#2452a5!important;}
+
+/* Sections */
+.event-section,.destinations,.pill-cloud,.organiser-strip{max-width:1440px!important;}
+.section-title h2,.event-section h2,.destinations h2,.pill-cloud h2,.organiser-strip h2{
+  font-size:clamp(24px,3vw,34px)!important;
+  letter-spacing:-.055em!important;
+}
+.browse-row{box-shadow:0 1px 0 #fff inset;background:rgba(255,255,255,.96)!important;}
+.tabs button{transition:.18s ease;border-radius:0;}
+.tabs button:hover{color:var(--lv-brand)!important;}
+.tabs .active{color:var(--lv-brand)!important;border-bottom-color:var(--lv-brand)!important;}
+.category-strip .cat div{background:#fff!important;box-shadow:0 10px 30px rgba(31,15,56,.06);}
+.category-strip .cat:hover div{box-shadow:0 20px 52px rgba(109,46,232,.18)!important;}
+
+/* Forms / buttons */
+input,select,textarea{transition:border-color .18s ease,box-shadow .18s ease;background:#fff;}
+input:focus,select:focus,textarea:focus{outline:0;border-color:#c9b7ff!important;box-shadow:0 0 0 4px rgba(109,46,232,.10)!important;}
+button,.primary-full,.ghost-full,.sponsor-full{transition:transform .18s ease,box-shadow .18s ease,background .18s ease;}
+button:hover,.primary-full:hover,.ghost-full:hover,.sponsor-full:hover{transform:translateY(-1px);}
+.primary-full,.panel button,.auth-card button,.sales-hero button,.organiser-strip button{background:var(--lv-brand)!important;box-shadow:0 14px 30px rgba(109,46,232,.22)!important;}
+.primary-full:hover,.panel button:hover,.auth-card button:hover,.sales-hero button:hover,.organiser-strip button:hover{background:#5f20d8!important;box-shadow:0 20px 44px rgba(109,46,232,.28)!important;}
+.ghost-full{border-color:#ddd3ef!important;background:#fff!important;}
+
+/* Dashboards */
+.dashboard-page{max-width:1440px!important;}
+.dashboard-content>h1,.dashboard-page h1,.simple-page h1,.help-page h1{
+  letter-spacing:-.065em!important;
+  color:var(--lv-ink)!important;
+}
+.eb-stats .stat,.stats .stat,.dashboard-page .stats>div{
+  background:linear-gradient(180deg,#fff,#fbfaff)!important;border:1px solid var(--lv-border)!important;border-radius:22px!important;padding:22px!important;box-shadow:var(--lv-shadow)!important;
+}
+.clean-row{border-bottom:1px solid #f0edf5!important;}
+.clean-row:last-child{border-bottom:0!important;}
+.side-menu button.active,.side-menu button:hover{background:linear-gradient(135deg,#f3efff,#fff4ef)!important;color:var(--lv-brand)!important;}
+
+/* Discovery injected UI */
+.home,.search-page{max-width:1440px;margin:0 auto;padding:54px 28px 80px;}
+.search-box{position:relative;max-width:760px;margin:0 auto 42px;background:#fff;border:1px solid var(--lv-border);border-radius:999px;padding:10px 18px;box-shadow:var(--lv-shadow);}
+.search-box input{width:100%;border:0!important;box-shadow:none!important;font-size:18px;padding:13px 8px;}
+#suggestions{position:absolute;top:calc(100% + 10px);left:0;right:0;background:#fff;border:1px solid var(--lv-border);border-radius:18px;box-shadow:var(--lv-shadow-hover);overflow:hidden;z-index:50;}
+#suggestions div{padding:14px 18px;border-bottom:1px solid #f0edf5;font-weight:800;cursor:pointer;}
+#suggestions div:hover{background:var(--lv-soft);color:var(--lv-brand);}
+.grid{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(245px,1fr))!important;gap:22px!important;}
+.filters{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 28px;}
+.filters button{border:1px solid var(--lv-border);background:#fff;border-radius:999px;padding:11px 18px;font-weight:900;}
+.filters button:hover{border-color:#cbbdff;color:var(--lv-brand);box-shadow:0 12px 28px rgba(109,46,232,.12);}
+
+/* Footer */
+.big-footer{background:linear-gradient(135deg,#180025,#371052 60%,#4b0b78)!important;}
+.footer-legal,.footer-bottom{border-top-color:rgba(255,255,255,.16)!important;}
+
+@media(max-width:900px){
+  .hero-copy{left:28px!important;right:28px!important;}
+  .topbar-v9{display:flex!important;gap:12px!important;}
+  .topbar-v9 .top-search{min-width:0!important;flex:1 1 100%!important;}
+  .event-grid{gap:20px!important;}
+  .small-card img,.event-card img{height:190px!important;}
+}
+@media(max-width:640px){
+  .eb-hero{border-radius:0!important;margin-top:0!important;}
+  .hero-copy h1{font-size:36px!important;}
+  .browse-row{padding:0 18px!important;}
+  .home,.search-page{padding:32px 18px 64px;}
+  .grid{grid-template-columns:1fr!important;}
+}
