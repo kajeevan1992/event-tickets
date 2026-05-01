@@ -3,6 +3,7 @@ import referralRoutes from './routes/referrals.js';
 import payoutRoutes from './routes/payouts.js';
 import stripeConnectRoutes from './routes/stripe-connect.js';
 import marketplaceRoutes from './routes/marketplace-payments.js';
+import globalPayoutRoutes from './routes/global-payouts.js';
 
 if (!express.application.__localvibeReferralAutoloadPatched) {
   express.application.__localvibeReferralAutoloadPatched = true;
@@ -17,6 +18,9 @@ if (!express.application.__localvibeReferralAutoloadPatched) {
       this.use('/api/payouts', payoutRoutes);
       this.use('/api/stripe-connect', stripeConnectRoutes);
       this.use('/api/marketplace', marketplaceRoutes);
+
+      // ✅ v78 global payouts
+      this.use('/api/global-payouts', globalPayoutRoutes);
     }
 
     return originalListen.apply(this, args);
