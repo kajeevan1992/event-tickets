@@ -233,14 +233,39 @@ function eventDetailHandler(req, res) {
 }
 app.get('/api/events/:id', eventDetailHandler);
 app.get('/events/:id', eventDetailHandler);
+
+function slugifyTicketName(value, fallback='ticket'){
+  return String(value || fallback).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || fallback;
+}
+function moneyInputToMinor(value){
+  if(typeof value === 'number') return Math.round(value);
+  const text = String(value ?? '').replace(/[^0-9.]/g,'');
+  return Math.round(Number(text || 0) * (String(value).includes('.') ? 100 : 1));
+}
+function normaliseTicketTypes(input, fallbackPriceMinor=0, fallbackCapacity=100){
+  const rows = Array.isArray(input) && input.length ? input : [{ id:'general', name:'General admission', priceMinor:fallbackPriceMinor, capacity:fallbackCapacity, description:'Standard entry' }];
+  return rows.map((t,i)=>{
+    const name = String(t.name || `Ticket tier ${i+1}`).trim();
+    return { id: slugifyTicketName(t.id || name || `tier_${i+1}`, `tier_${i+1}`), name, priceMinor: Number.isFinite(Number(t.priceMinor)) ? Number(t.priceMinor) : moneyInputToMinor(t.price || t.amount || 0), capacity: Math.max(0, Number(t.capacity || t.quantity || 0)), sold: Math.max(0, Number(t.sold || 0)), saleStart: t.saleStart || '', saleEnd: t.saleEnd || '', accessLevel: t.accessLevel || 'standard', description: t.description || '' };
+  });
+}
+function normaliseEventPayload(body={}){
+  const ticketTypes = normaliseTicketTypes(body.ticketTypes, Number(body.priceMinor || 0), Number(body.capacity || 100));
+  const totalCapacity = ticketTypes.reduce((sum,t)=>sum+Number(t.capacity||0),0) || Number(body.capacity || 100);
+  const fromPrice = ticketTypes.reduce((min,t)=>Math.min(min, Number(t.priceMinor || 0)), ticketTypes[0]?.priceMinor ?? Number(body.priceMinor || 0));
+  const eventType = body.eventType || body.type || 'single';
+  return { ...body, title: body.title || 'New LocalVibe event', status: body.status || 'pending', eventType, type:eventType, visibility: body.visibility || 'public', city: body.city || 'London', venue: body.venue || body.location || body.city || 'London', organiser: body.organiser || 'New organiser', capacity: totalCapacity, priceMinor: fromPrice, ticketTypes, schedule: { eventType, date: body.date || '', time: body.time || '', timezone: body.timezone || 'Europe/London', dates: Array.isArray(body.dates) ? body.dates : [], recurrence: body.recurrence || 'none', saleStart: body.saleStart || '', saleEnd: body.saleEnd || '' }, pageBuilder: { heroLayout: body.heroLayout || 'image_left', seoTitle: body.seoTitle || body.title || '', seoDescription: body.seoDescription || body.desc || body.description || '', blocks: Array.isArray(body.blocks) ? body.blocks : [] }, rules: { approvalRequired: body.approvalRequired !== false, allowSponsorEnquiries: body.allowSponsorEnquiries !== false, allowWaitlist: Boolean(body.allowWaitlist), conditionLogic: body.conditionLogic || '' }, updatedAt: new Date().toISOString() };
+}
+
 app.post('/api/events', (req, res) => {
-  const item = { id:String(Date.now()), status:'pending', priceMinor:Number(req.body.priceMinor || 0), capacity:Number(req.body.capacity || 100), sold:0, boost:'New Organiser', image:'https://images.unsplash.com/photo-1528605248644-14dd04022da1?auto=format&fit=crop&w=1200&q=80', ...req.body };
+  const payload = normaliseEventPayload(req.body || {});
+  const item = { id:String(Date.now()), sold:0, boost:'New Organiser', image:'https://images.unsplash.com/photo-1528605248644-14dd04022da1?auto=format&fit=crop&w=1200&q=80', createdAt:new Date().toISOString(), ...payload };
   events.unshift(item);
   res.status(201).json({ ok:true, item:publicEvent(item) });
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v61-order-audit-refund-controls';
+const BUILD_VERSION = 'v73-event-builder-engine';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -632,10 +657,24 @@ app.get('/api/admin/events', (req,res)=>{
   const counts = items.reduce((acc,e)=>{ const k=e.status || 'draft'; acc[k]=(acc[k]||0)+1; return acc; },{});
   res.json({ ok:true, count:items.length, counts, items:items.map(publicEvent) });
 });
+
+app.get('/api/admin/event-builder/templates', (req,res)=>{
+  res.json({ ok:true, items:[
+    { id:'music-night', name:'Music / nightlife', category:'Music', ticketTypes:[{id:'early_bird',name:'Early bird',priceMinor:800,capacity:50,description:'Limited first release'},{id:'general',name:'General admission',priceMinor:1200,capacity:150,description:'Standard entry'},{id:'vip',name:'VIP',priceMinor:2500,capacity:20,description:'Priority entry and VIP perks'}], blocks:['hero','about','lineup','faq'] },
+    { id:'community-free', name:'Free community event', category:'Community', ticketTypes:[{id:'free',name:'Free RSVP',priceMinor:0,capacity:300,description:'Free registration'}], blocks:['hero','about','location'] },
+    { id:'business-mixer', name:'Business / networking', category:'Business', ticketTypes:[{id:'standard',name:'Standard',priceMinor:1000,capacity:100,description:'Networking access'},{id:'sponsor',name:'Sponsor pass',priceMinor:5000,capacity:10,description:'Sponsor table and brand placement'}], blocks:['hero','agenda','sponsors','faq'] }
+  ]});
+});
+app.get('/api/admin/events/:id/builder', (req,res)=>{
+  const event = events.find(e => e.id === req.params.id);
+  if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  res.json({ ok:true, item:publicEvent(event), builder:{ schedule:event.schedule || {}, pageBuilder:event.pageBuilder || {}, rules:event.rules || {}, ticketTypes:event.ticketTypes || [] } });
+});
+
 app.post('/api/admin/events/:id/clone', (req,res)=>{
   const event = events.find(e => e.id === req.params.id);
   if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
-  const cloned = { ...event, id:String(Date.now()), title:String(event.title || 'Event') + ' Copy', status:'pending', sold:0, approvedAt:null, clonedFrom:event.id };
+  const cloned = { ...JSON.parse(JSON.stringify(event)), id:String(Date.now()), title:String(event.title || 'Event') + ' Copy', status:'pending', sold:0, approvedAt:null, clonedFrom:event.id, ticketTypes:(event.ticketTypes||[]).map(t=>({...t,sold:0})), createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() };
   events.unshift(cloned);
   res.status(201).json({ ok:true, item:publicEvent(cloned) });
 });
@@ -735,7 +774,8 @@ app.post('/api/tickets/:ticketId/checkin', (req,res)=>{
 app.patch('/api/events/:id', (req,res)=>{
   const event = events.find(e => e.id === req.params.id);
   if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
-  Object.assign(event, req.body || {});
+  const next = normaliseEventPayload({ ...event, ...(req.body || {}) });
+  Object.assign(event, next);
   res.json({ ok:true, item:publicEvent(event) });
 });
 app.delete('/api/events/:id', (req,res)=>{

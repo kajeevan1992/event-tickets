@@ -78,3 +78,11 @@
 .active-tier{border-color:#7c3aed!important;background:rgba(124,58,237,.08)}
 
 .lv-error-boundary{min-height:100vh;display:grid;place-items:center;background:#f7f7f8;padding:24px}.lv-error-boundary>div{max-width:560px;background:#fff;border:1px solid #eee;border-radius:24px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.08)}.lv-error-boundary h1{margin-top:0}.lv-error-boundary pre{white-space:pre-wrap;font-size:12px;background:#f4f4f5;padding:12px;border-radius:12px}
+
+/* v73 event builder engine */
+.ticket-tier-editor{border:1px solid rgba(15,23,42,.08);border-radius:18px;padding:16px;margin:14px 0;background:#fff}
+.builder-note{margin:12px 0;padding:12px 14px;border-radius:14px;background:#f8fafc;color:#475569;font-size:14px}
+.review-list{display:grid;gap:8px;background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;padding:16px;margin:12px 0}
+.preview-tips{display:grid;gap:8px;margin-top:16px;padding:16px;border-radius:18px;background:#f8fafc}
+.preview-tips span{font-size:13px;color:#475569}
+.row-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
