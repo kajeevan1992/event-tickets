@@ -1,7 +1,7 @@
 import React,{useEffect,useRef,useState}from'react';
 import{createRoot}from'react-dom/client';
 import{BrowserRouter,Routes,Route,Link,useParams,useSearchParams}from'react-router-dom';
-import{Search,MapPin,Calendar,Mic2,Music2,Drama,PartyPopper,HeartHandshake,Gamepad2,BriefcaseBusiness,UtensilsCrossed,ChevronDown,ChevronRight,ChevronLeft,Ticket,Handshake,ShieldCheck,PlusCircle,QrCode,Users,CheckCircle,FileText,DollarSign,UserRound,BookOpen,MessageCircle,Flag,Globe2,CreditCard}from'lucide-react';
+import{Search,MapPin,Calendar,Mic2,Music2,Drama,PartyPopper,HeartHandshake,Gamepad2,BriefcaseBusiness,UtensilsCrossed,ChevronDown,ChevronRight,ChevronLeft,Ticket,Handshake,ShieldCheck,PlusCircle,QrCode,Users,CheckCircle,FileText,DollarSign,UserRound,BookOpen,MessageCircle,Flag,Globe2,CreditCard,Mail,Send}from'lucide-react';
 import'./index.css';
 import{events as fallbackEvents}from'./data';
 const API=(import.meta.env.VITE_API_URL||'').replace(/\/$/,'');
@@ -248,6 +248,64 @@ function AdminAnalytics(){
  function Stat({t,v}){return <div className="stat"><p>{t}</p><b>{v}</b></div>}
 function Panel({title,icon,children}){return <div className="panel"><h3>{icon}{title}</h3>{children}</div>}
 
+
+function AdminEmailSettings(){
+  const[settings,setSettings]=useState(null);
+  const[log,setLog]=useState([]);
+  const[to,setTo]=useState('');
+  const[msg,setMsg]=useState('Loading email settings...');
+  async function load(){
+    try{
+      const d=await api('/api/admin/email-settings');
+      setSettings(d.config||null);
+      setLog(d.recent||[]);
+      setMsg('Email settings loaded.');
+    }catch(err){setMsg('Could not load email settings. Check API deployment.');}
+  }
+  useEffect(()=>{load()},[]);
+  async function sendTest(e){
+    e.preventDefault();
+    setMsg('Sending test email...');
+    try{
+      const d=await api('/api/admin/email-test',{method:'POST',body:JSON.stringify({to})});
+      setMsg(d.message||'Test email request saved.');
+      await load();
+    }catch(err){setMsg(err?.message||'Test email failed. Check provider settings.');}
+  }
+  return <DashShell title="Email delivery" type="admin">
+    <div className="stats eb-stats four">
+      <Stat t="Provider" v={settings?.provider||'—'}/>
+      <Stat t="Connected" v={settings?.connected?'Yes':'No'}/>
+      <Stat t="Resend" v={settings?.resendConnected?'Ready':'Off'}/>
+      <Stat t="Mode" v={settings?.mode||'—'}/>
+    </div>
+    {msg&&<div className="api-note">{msg}</div>}
+    <div className="two-col">
+      <Panel title="Provider setup" icon={<Mail/>}>
+        <div className="clean-row"><b>From</b><span>{settings?.from||'Not set'}</span></div>
+        <div className="clean-row"><b>Reply-to</b><span>{settings?.replyTo||'Not set'}</span></div>
+        <div className="clean-row"><b>Required env</b><span>EMAIL_PROVIDER=resend, RESEND_API_KEY, EMAIL_FROM</span></div>
+        <div className="clean-row"><b>Status</b><span>{settings?.connected?'Ready to send':'Provider missing — emails will be queued only'}</span></div>
+      </Panel>
+      <Panel title="Send test email" icon={<Send/>}>
+        <form onSubmit={sendTest}>
+          <label>Recipient email</label>
+          <input type="email" required value={to} onChange={e=>setTo(e.target.value)} placeholder="you@example.com"/>
+          <button>Send test</button>
+        </form>
+        <small>This sends the same branded ticket-style email template used after payment.</small>
+      </Panel>
+    </div>
+    <Panel title="Recent email log" icon={<Mail/>}>
+      {log.length?log.map(item=><div className="clean-row" key={item.id}>
+        <b>{item.to}</b>
+        <span>{item.status} · {item.provider} · {item.subject}</span>
+        {item.ticketUrl&&<a href={item.ticketUrl} target="_blank" rel="noreferrer">Open ticket</a>}
+      </div>):<div className="clean-row"><b>No email activity yet</b><span>Paid ticket emails and test emails will appear here.</span></div>}
+    </Panel>
+  </DashShell>
+}
+
 function AdminOrderOps(){
   const{orderId}=useParams();
   const[order,setOrder]=useState(null);
@@ -306,5 +364,5 @@ class ErrorBoundary extends React.Component{
   }
 }
 
-function App(){return <Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<FindEvents/>}/><Route path="/find-events" element={<FindEvents/>}/><Route path="/updates" element={<Updates/>}/><Route path="/create-events" element={<CreateEvents/>}/><Route path="/contact-sales" element={<ContactSales/>}/><Route path="/help" element={<Help/>}/><Route path="/events/london" element={<CityEvents/>}/><Route path="/events/city/:city" element={<CityEvents/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/organiser" element={<Organiser/>}/><Route path="/organiser/create" element={<EventBuilder/>}/><Route path="/dashboard" element={<Dashboard/>}/><Route path="/my-orders" element={<MyOrders/>}/><Route path="/admin" element={<Admin/>}/><Route path="/admin/dashboard" element={<AdminAnalytics/>}/><Route path="/admin/attendees" element={<AttendeeManager/>}/><Route path="/admin/events" element={<AdminEventManager/>}/><Route path="/admin/promos" element={<AdminPromos/>}/><Route path="/admin/orders/:orderId" element={<AdminOrderOps/>}/> <Route path="/scanner" element={<ScannerPage/>}/><Route path="/check-in" element={<ScannerPage/>}/><Route path="/checkout/:id" element={<Checkout/>}/><Route path="/payment/:orderId" element={<PaymentPage/>}/><Route path="/ticket/:ticketId" element={<TicketPage/>}/><Route path="/signin" element={<Signin/>}/><Route path="/tickets-login" element={<Signin tickets/>}/><Route path="*" element={<Home/>}/></Routes>}
+function App(){return <Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<FindEvents/>}/><Route path="/find-events" element={<FindEvents/>}/><Route path="/updates" element={<Updates/>}/><Route path="/create-events" element={<CreateEvents/>}/><Route path="/contact-sales" element={<ContactSales/>}/><Route path="/help" element={<Help/>}/><Route path="/events/london" element={<CityEvents/>}/><Route path="/events/city/:city" element={<CityEvents/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/organiser" element={<Organiser/>}/><Route path="/organiser/create" element={<EventBuilder/>}/><Route path="/dashboard" element={<Dashboard/>}/><Route path="/my-orders" element={<MyOrders/>}/><Route path="/admin" element={<Admin/>}/><Route path="/admin/dashboard" element={<AdminAnalytics/>}/><Route path="/admin/attendees" element={<AttendeeManager/>}/><Route path="/admin/events" element={<AdminEventManager/>}/><Route path="/admin/promos" element={<AdminPromos/>}/><Route path="/admin/email" element={<AdminEmailSettings/>}/><Route path="/admin/orders/:orderId" element={<AdminOrderOps/>}/> <Route path="/scanner" element={<ScannerPage/>}/><Route path="/check-in" element={<ScannerPage/>}/><Route path="/checkout/:id" element={<Checkout/>}/><Route path="/payment/:orderId" element={<PaymentPage/>}/><Route path="/ticket/:ticketId" element={<TicketPage/>}/><Route path="/signin" element={<Signin/>}/><Route path="/tickets-login" element={<Signin tickets/>}/><Route path="*" element={<Home/>}/></Routes>}
 createRoot(document.getElementById('root')).render(<BrowserRouter><ErrorBoundary><App/></ErrorBoundary></BrowserRouter>);
