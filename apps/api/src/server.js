@@ -839,4 +839,38 @@ app.post('/api/promo/validate', (req,res)=>{
 });
 
 
+
+// v65: organiser/admin dashboard analytics and per-event performance stats.
+function paidLikeOrder(o){ return ['paid','checked_in'].includes(String(o.status||'')) && Number(o.amountMinor||0) >= 0; }
+function eventAnalytics(event){
+  const all = adminOrderList().filter(o => String(o.eventId) === String(event.id));
+  const paid = all.filter(paidLikeOrder);
+  const pending = all.filter(o => String(o.status) === 'pending');
+  const checked = paid.filter(o => o.checkedInAt || o.status === 'checked_in');
+  const revenueMinor = paid.reduce((sum,o)=>sum+Number(o.amountMinor||0),0);
+  const capacity = Number(event.capacity || 0);
+  const sold = paid.reduce((sum,o)=>sum+Number(o.quantity||1),0);
+  const remaining = Math.max(0, capacity - sold);
+  const ticketTypePerformance = (event.ticketTypes || []).map(t => {
+    const tierOrders = paid.filter(o => String(o.ticketTypeId || 'general') === String(t.id || 'general'));
+    const tierSold = tierOrders.reduce((sum,o)=>sum+Number(o.quantity||1),0);
+    const tierRevenueMinor = tierOrders.reduce((sum,o)=>sum+Number(o.amountMinor||0),0);
+    return { id:t.id || 'general', name:t.name || 'General admission', sold:tierSold, capacity:Number(t.capacity || event.capacity || 0), revenueMinor:tierRevenueMinor, revenue:money(tierRevenueMinor) };
+  });
+  if(!ticketTypePerformance.length){ ticketTypePerformance.push({ id:'general', name:'General admission', sold, capacity, revenueMinor, revenue:money(revenueMinor) }); }
+  return { eventId:event.id, title:event.title, city:event.city || '', venue:event.venue || event.location || '', status:event.status || 'published', sold, capacity, remaining, capacityPct: capacity ? Math.round((sold / capacity) * 100) : 0, revenueMinor, revenue:money(revenueMinor), checkedIn:checked.length, pendingOrders:pending.length, paidOrders:paid.length, ticketTypePerformance };
+}
+app.get('/api/admin/stats', (req,res)=>{
+  const perEvent = events.map(eventAnalytics);
+  const totals = perEvent.reduce((acc,e)=>{ acc.events += 1; acc.sold += e.sold; acc.capacity += e.capacity; acc.remaining += e.remaining; acc.checkedIn += e.checkedIn; acc.pendingOrders += e.pendingOrders; acc.revenueMinor += e.revenueMinor; return acc; }, { events:0, sold:0, capacity:0, remaining:0, checkedIn:0, pendingOrders:0, revenueMinor:0 });
+  totals.revenue = money(totals.revenueMinor);
+  totals.capacityPct = totals.capacity ? Math.round((totals.sold / totals.capacity) * 100) : 0;
+  res.json({ ok:true, totals, events:perEvent });
+});
+app.get('/api/admin/events/:id/stats', (req,res)=>{
+  const event = events.find(e => String(e.id) === String(req.params.id));
+  if(!event) return res.status(404).json({ ok:false, error:'Event not found' });
+  res.json({ ok:true, item:eventAnalytics(event) });
+});
+
 app.listen(port, () => console.log(`API running on ${port}`));
