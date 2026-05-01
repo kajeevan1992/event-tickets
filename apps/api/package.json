@@ -13,8 +13,8 @@
     "db:setup": "prisma generate && prisma db push && node prisma/seed.js"
   },
   "dependencies": {
-    "@prisma/client": "latest",
-    "prisma": "latest",
+    "@prisma/client": "6.16.3",
+    "prisma": "6.16.3",
     "express": "latest",
     "cors": "latest",
     "helmet": "latest",
