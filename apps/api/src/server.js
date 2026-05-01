@@ -35,6 +35,7 @@ app.post(['/api/stripe/webhook','/api/webhooks/stripe'], express.raw({ type:'app
     if ((eventPayload.type === 'checkout.session.expired' || eventPayload.type === 'checkout.session.async_payment_failed' || eventPayload.type === 'payment_intent.payment_failed') && order && order.status !== 'paid') {
       order.status = eventPayload.type === 'checkout.session.expired' ? 'cancelled' : 'failed';
       order.failedAt = new Date().toISOString();
+      writeOrderAudit(order, 'payment.' + order.status, { stripeEvent:eventPayload.type }, 'stripe');
     }
     res.json({ received:true });
   } catch (err) {
@@ -72,6 +73,16 @@ let orders = [];
 let pendingOrders = [];
 let salesLeads = [];
 let emailDeliveries = [];
+let orderAuditLog = [];
+function writeOrderAudit(order, action, details={}, actor='system'){
+  if(!order) return null;
+  const item = { id:'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), orderId:order.id, ticketId:order.ticketId || null, eventId:order.eventId || null, action, actor, details, status:order.status || null, createdAt:new Date().toISOString() };
+  orderAuditLog.unshift(item);
+  order.auditTrail = [item, ...(Array.isArray(order.auditTrail) ? order.auditTrail : [])].slice(0,50);
+  return item;
+}
+function publicAudit(a){ return { id:a.id, orderId:a.orderId, ticketId:a.ticketId, action:a.action, actor:a.actor, details:a.details || {}, status:a.status, createdAt:a.createdAt }; }
+function orderById(orderId){ return orders.find(o => o.id === orderId) || pendingOrders.find(o => o.id === orderId); }
 let updates = [
   { date:'Apr 17, 2026', title:'New organiser profile page', body:'Your public profile now shows images, socials, upcoming events and trust badges.' },
   { date:'Apr 14, 2026', title:'Top organiser badge', body:'Creators who consistently run quality events earn a badge across their profile and listings.' },
@@ -179,7 +190,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v60-promo-discounts-checkout';
+const BUILD_VERSION = 'v61-order-audit-refund-controls';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -280,6 +291,7 @@ app.post('/api/checkout/start', async (req, res) => {
   const discountMinor = calculatePromoDiscount(subtotalMinor, promo);
   const amountMinor = Math.max(0, subtotalMinor - discountMinor);
   const order = { id:'ord_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), eventId:event.id, event:event.title, ticketTypeId:String(tier?.id || 'general'), ticketTypeName:tier?.name || 'General admission', unitAmountMinor:Number(tier?.priceMinor ?? event.priceMinor ?? 0), name, email, quantity, subtotalMinor, discountMinor, amountMinor, promoCode:promo?.code || null, promo:promo ? publicPromo(promo, subtotalMinor) : null, status:'pending_payment', createdAt:new Date().toISOString() };
+  writeOrderAudit(order, 'order.created', { source:'checkout', ticketType:order.ticketTypeName, quantity:order.quantity, promoCode:order.promoCode || null, totalMinor:order.amountMinor }, 'customer');
   pendingOrders.unshift(order);
   res.status(201).json({ ok:true, order:safeOrder(order), checkoutUrl:'/payment/' + order.id, paymentRequired:amountMinor>0, promo:order.promo });
 });
@@ -295,6 +307,7 @@ function safeOrder(order){
 }
 async function issuePaidTicket(order, provider='manual'){
   if(order.status === 'paid' && order.ticketId){
+    writeOrderAudit(order, 'payment.already_paid', { provider }, 'system');
     return orders.find(o => o.id === order.id) || order;
   }
   if(['cancelled','failed','expired'].includes(order.status)){
@@ -307,6 +320,7 @@ async function issuePaidTicket(order, provider='manual'){
   const receiptId = order.receiptId || ('rcpt_' + Date.now() + '_' + Math.random().toString(36).slice(2,6));
   const ticket = { ...order, ticketId, receiptId, qr, status:'paid', paidAt, paymentProvider:provider, capacityCommittedAt:new Date().toISOString() };
   Object.assign(order, ticket);
+  writeOrderAudit(order, 'payment.confirmed_ticket_issued', { provider, ticketId, receiptId, amountMinor:order.amountMinor }, 'system');
   const existingIndex = orders.findIndex(o => o.id === order.id);
   if(existingIndex >= 0) orders[existingIndex] = { ...orders[existingIndex], ...ticket };
   else orders.unshift(ticket);
@@ -493,6 +507,7 @@ app.post('/api/orders', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   if (!name || !email.includes('@')) return res.status(400).json({ ok:false, error:'Valid name and email are required' });
   const order = { id:'ord_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), eventId:event.id, event:event.title, name, email, quantity, amountMinor:(event.priceMinor || 0) * quantity, status:'pending_payment', createdAt:new Date().toISOString(), source:'legacy_order_endpoint' };
+  writeOrderAudit(order, 'order.created', { source:'checkout', ticketType:order.ticketTypeName, quantity:order.quantity, promoCode:order.promoCode || null, totalMinor:order.amountMinor }, 'customer');
   pendingOrders.unshift(order);
   res.status(201).json({ ok:true, order:safeOrder(order), checkoutUrl:'/payment/' + order.id, paymentRequired:true, message:'Order reserved. Complete payment before ticket/QR is created.' });
 });
@@ -529,6 +544,7 @@ function performTicketCheckin(ticketInput, source='manual'){
   order.status = 'checked_in';
   order.checkedInAt = new Date().toISOString();
   order.checkedInSource = source;
+  writeOrderAudit(order, 'ticket.checked_in', { source, ticketId:order.ticketId }, 'door');
   return order;
 }
 
@@ -573,7 +589,7 @@ app.patch('/api/admin/sponsorships/:id', (req,res)=>{ const s=sponsorships.find(
 app.patch('/api/admin/events/:id/approve', (req,res)=>{ const e=events.find(x=>x.id===req.params.id); if(!e)return res.status(404).json({ok:false,error:'Event not found'}); e.status='published'; e.approvedAt=new Date().toISOString(); res.json({ok:true,item:publicEvent(e)}); });
 function adminOrderList(){
   const all = [...orders, ...pendingOrders.filter(p => !orders.some(o => o.id === p.id))];
-  return all.map(o => ({ ...safeOrder(o), eventTitle:events.find(e=>e.id===o.eventId)?.title || o.event, amount:money(o.amountMinor), createdAt:o.createdAt, paidAt:o.paidAt || null, checkedInAt:o.checkedInAt || null }));
+  return all.map(o => ({ ...safeOrder(o), eventTitle:events.find(e=>e.id===o.eventId)?.title || o.event, amount:money(o.amountMinor), createdAt:o.createdAt, paidAt:o.paidAt || null, checkedInAt:o.checkedInAt || null, auditCount:Array.isArray(o.auditTrail)?o.auditTrail.length:0, refundStatus:o.refundStatus || null, cancelledAt:o.cancelledAt || null }));
 }
 function operationalMetrics(){
   cleanupExpiredPendingOrders();
@@ -679,7 +695,45 @@ app.patch('/api/admin/events/:id/reject', (req,res)=>{
   res.json({ ok:true, item:publicEvent(event) });
 });
 app.get('/api/admin/orders', (req,res)=>{
-  res.json({ ok:true, items:adminOrderList() });
+  const status = String(req.query.status || '').trim();
+  const eventId = String(req.query.eventId || '').trim();
+  let items = adminOrderList();
+  if(status) items = items.filter(o => String(o.status) === status);
+  if(eventId) items = items.filter(o => String(o.eventId) === eventId);
+  res.json({ ok:true, count:items.length, items });
+});
+app.get('/api/admin/orders/:orderId', (req,res)=>{
+  const order = orderById(req.params.orderId);
+  if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  res.json({ ok:true, item:{ ...safeOrder(order), eventTitle:events.find(e=>e.id===order.eventId)?.title || order.event, amount:money(order.amountMinor), receipt:publicReceipt(order), auditTrail:(order.auditTrail||[]).map(publicAudit) } });
+});
+app.get('/api/admin/orders/:orderId/audit', (req,res)=>{
+  const order = orderById(req.params.orderId);
+  if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  res.json({ ok:true, items:(order.auditTrail||[]).map(publicAudit) });
+});
+app.post('/api/admin/orders/:orderId/cancel', (req,res)=>{
+  const order = orderById(req.params.orderId);
+  if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if(order.status === 'paid' || order.status === 'checked_in') return res.status(409).json({ ok:false, error:'Paid orders need refund workflow, not cancellation.' });
+  order.status = 'cancelled'; order.cancelledAt = new Date().toISOString(); order.cancelReason = req.body?.reason || 'Cancelled by admin';
+  writeOrderAudit(order, 'order.cancelled', { reason:order.cancelReason }, 'admin');
+  pendingOrders = pendingOrders.filter(o => o.id !== order.id);
+  if(!orders.some(o=>o.id===order.id)) orders.unshift(order);
+  res.json({ ok:true, item:safeOrder(order) });
+});
+app.post('/api/admin/orders/:orderId/refund-request', (req,res)=>{
+  const order = orderById(req.params.orderId);
+  if(!order) return res.status(404).json({ ok:false, error:'Order not found' });
+  if(order.status !== 'paid' && order.status !== 'checked_in') return res.status(409).json({ ok:false, error:'Only paid orders can enter refund review.' });
+  order.refundStatus = 'review_required'; order.refundRequestedAt = new Date().toISOString(); order.refundReason = req.body?.reason || 'Admin refund review requested';
+  writeOrderAudit(order, 'refund.review_requested', { reason:order.refundReason, stripePaymentIntentId:order.stripePaymentIntentId || null }, 'admin');
+  res.json({ ok:true, message:'Refund review logged. Connect Stripe Refund API before automatic refunding.', item:safeOrder(order) });
+});
+app.get('/api/admin/audit-log', (req,res)=>{
+  const orderId = String(req.query.orderId || '').trim();
+  const items = orderAuditLog.filter(a => !orderId || a.orderId === orderId).map(publicAudit);
+  res.json({ ok:true, count:items.length, items });
 });
 app.get('/api/admin/checkin-log', (req,res)=>{
   res.json({ ok:true, items:adminOrderList().filter(o=>o.checkedInAt) });
