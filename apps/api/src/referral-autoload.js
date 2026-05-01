@@ -1,13 +1,13 @@
 import express from 'express';
 import referralRoutes from './routes/referrals.js';
 import payoutRoutes from './routes/payouts.js';
+import stripeConnectRoutes from './routes/stripe-connect.js';
 
-// v75: referral + payouts autoload
 if (!express.application.__localvibeReferralAutoloadPatched) {
   express.application.__localvibeReferralAutoloadPatched = true;
   const originalListen = express.application.listen;
 
-  express.application.listen = function patchedListen(...args) {
+  express.application.listen = function localvibeListen(...args) {
     if (!this.__localvibeReferralRoutesMounted) {
       this.__localvibeReferralRoutesMounted = true;
 
@@ -17,6 +17,9 @@ if (!express.application.__localvibeReferralAutoloadPatched) {
 
       // v75
       this.use('/api/payouts', payoutRoutes);
+
+      // v76
+      this.use('/api/stripe-connect', stripeConnectRoutes);
     }
 
     return originalListen.apply(this, args);
