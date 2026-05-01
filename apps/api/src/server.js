@@ -81,7 +81,14 @@ let updates = [
 ];
 
 const money = minor => minor === 0 ? 'Free' : `£${(Number(minor || 0) / 100).toFixed(Number(minor || 0) % 100 ? 2 : 0)}`;
-const publicEvent = e => ({ ...e, price: money(e.priceMinor), remaining: Math.max((e.capacity || 0) - (e.sold || 0), 0) });
+function publicEvent(e){
+  const totalRemaining = Math.max((e.capacity || 0) - (e.sold || 0), 0);
+  const ticketTypes = Array.isArray(e.ticketTypes) && e.ticketTypes.length
+    ? e.ticketTypes.map(t => ({ ...t, id:String(t.id || t.name || "general"), priceMinor:Number(t.priceMinor || 0), price:money(Number(t.priceMinor || 0)), capacity:Number(t.capacity || 0), sold:Number(t.sold || 0), remaining:Math.max(Number(t.capacity || 0) - Number(t.sold || 0), 0) }))
+    : [{ id:"general", name:"General admission", priceMinor:Number(e.priceMinor || 0), price:money(e.priceMinor || 0), capacity:Number(e.capacity || 0), sold:Number(e.sold || 0), remaining:totalRemaining, description:"Standard entry" }];
+  const fromPriceMinor = ticketTypes.reduce((min,t)=>Math.min(min, Number(t.priceMinor || 0)), ticketTypes[0]?.priceMinor ?? Number(e.priceMinor || 0));
+  return { ...e, ticketTypes, priceMinor:fromPriceMinor, price: money(fromPriceMinor), remaining: totalRemaining };
+}
 const formatDateTime = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : null;
 function buildTicketEmail(order){
   const receipt = publicReceipt(order);
@@ -105,8 +112,12 @@ function queueTicketEmail(order, requestedBy='customer'){
 function publicReceipt(order){
   if(!order) return null;
   const event = events.find(e => e.id === order.eventId);
-  const subtotalMinor = Number(order.amountMinor || 0);
+  const subtotalMinor = Number(order.subtotalMinor ?? order.amountMinor ?? 0);
+  const discountMinor = Number(order.discountMinor || 0);
+  const totalMinor = Number(order.amountMinor || Math.max(0, subtotalMinor - discountMinor));
   const qty = Math.max(1, Number(order.quantity || 1));
+  const unit = Number(order.unitAmountMinor || Math.round(subtotalMinor / qty) || 0);
+  const tierLabel = order.ticketTypeName ? ' — ' + order.ticketTypeName : '';
   return {
     receiptId: order.receiptId || null,
     orderId: order.id,
@@ -117,14 +128,16 @@ function publicReceipt(order){
     paidAtLabel: formatDateTime(order.paidAt),
     customer:{ name:order.name, email:order.email },
     event:event ? publicEvent(event) : { id:order.eventId, title:order.event },
+    ticketType:{ id:order.ticketTypeId || 'general', name:order.ticketTypeName || 'General admission' },
     quantity:qty,
     currency:(process.env.CURRENCY || 'gbp').toUpperCase(),
-    subtotalMinor,
-    totalMinor:subtotalMinor,
-    total:money(subtotalMinor),
-    lineItems:[{ label:event?.title || order.event || 'LocalVibe ticket', quantity:qty, unitAmountMinor:event?.priceMinor || Math.round(subtotalMinor / qty), totalMinor:subtotalMinor, total:money(subtotalMinor) }]
+    subtotalMinor, discountMinor, totalMinor,
+    subtotal:money(subtotalMinor), discount:money(discountMinor), total:money(totalMinor),
+    promoCode:order.promoCode || null,
+    lineItems:[{ label:(event?.title || order.event || 'LocalVibe ticket') + tierLabel, quantity:qty, unitAmountMinor:unit, totalMinor:subtotalMinor, total:money(subtotalMinor) }]
   };
 }
+
 
 app.get('/', (req, res) => res.json({ ok:true, service:'LocalVibe API', message:'API is running', endpoints:['/health','/api/health','/api/events','/events'] }));
 app.get('/health', (req, res) => res.json({ ok:true, status:'healthy', service:'LocalVibe API' }));
@@ -166,7 +179,7 @@ app.post('/api/events', (req, res) => {
 });
 
 // v46: production readiness helpers
-const BUILD_VERSION = 'v58-organiser-event-management';
+const BUILD_VERSION = 'v60-promo-discounts-checkout';
 const pendingTtlMs = Number(process.env.PENDING_ORDER_TTL_MS || 30 * 60 * 1000);
 function stripeIsConfigured(){
   return String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_');
@@ -197,15 +210,53 @@ function cleanupExpiredPendingOrders(){
 function assertCapacityAvailable(order){
   const event = events.find(e => e.id === order.eventId);
   if(!event) { const err = new Error('Event not found'); err.status = 404; throw err; }
+  const quantity = Number(order.quantity || 1);
   const remaining = Math.max((event.capacity || 0) - (event.sold || 0), 0);
-  if (remaining < Number(order.quantity || 1) && !order.capacityCommittedAt) {
+  if (remaining < quantity && !order.capacityCommittedAt) {
     const err = new Error('Not enough tickets remaining');
     err.status = 409;
     err.remaining = remaining;
     throw err;
   }
+  if(order.ticketTypeId && Array.isArray(event.ticketTypes)){
+    const tier = event.ticketTypes.find(t=>String(t.id)===String(order.ticketTypeId));
+    if(tier){
+      const tierRemaining = Math.max(Number(tier.capacity || 0) - Number(tier.sold || 0), 0);
+      if(tierRemaining < quantity && !order.capacityCommittedAt){
+        const err = new Error('Not enough tickets remaining for this ticket type');
+        err.status = 409;
+        err.remaining = tierRemaining;
+        throw err;
+      }
+    }
+  }
   return event;
 }
+function getTicketSelection(event, ticketTypeId){
+  const tiers = Array.isArray(event.ticketTypes) && event.ticketTypes.length
+    ? event.ticketTypes
+    : [{ id:'general', name:'General admission', priceMinor:Number(event.priceMinor || 0), capacity:Number(event.capacity || 0), sold:Number(event.sold || 0) }];
+  return tiers.find(t=>String(t.id)===String(ticketTypeId)) || tiers[0];
+}
+function calculatePromoDiscount(subtotalMinor, promo){
+  if(!promo || !promo.active) return 0;
+  if(promo.type === 'percent') return Math.min(subtotalMinor, Math.round(subtotalMinor * Number(promo.amount || 0) / 100));
+  if(promo.type === 'fixed') return Math.min(subtotalMinor, Number(promo.amountMinor || 0));
+  return 0;
+}
+function publicPromo(promo, subtotalMinor=0){
+  const discountMinor = calculatePromoDiscount(Number(subtotalMinor || 0), promo);
+  return {
+    code:promo.code,
+    type:promo.type,
+    amount:promo.amount || null,
+    amountMinor:promo.amountMinor || null,
+    discountMinor,
+    discount:money(discountMinor),
+    label: promo.type === 'percent' ? String(promo.amount) + '% off' : money(promo.amountMinor) + ' off'
+  };
+}
+
 app.get('/api/config', (req,res)=>res.json({ ok:true, config:getPaymentConfig() }));
 app.get('/api/payments/config', (req,res)=>res.json({ ok:true, config:getPaymentConfig() }));
 
@@ -214,16 +265,25 @@ app.post('/api/checkout/start', async (req, res) => {
   const event = events.find(e => e.id === String(req.body.eventId));
   if (!event) return res.status(404).json({ ok:false, error:'Event not found' });
   const quantity = Math.max(1, Math.min(10, Number(req.body.quantity || 1)));
+  const tier = getTicketSelection(event, req.body.ticketTypeId || 'general');
   const remaining = Math.max((event.capacity || 0) - (event.sold || 0), 0);
+  const tierRemaining = tier ? Math.max(Number(tier.capacity || event.capacity || 0) - Number(tier.sold || 0), 0) : remaining;
   if (remaining < quantity) return res.status(409).json({ ok:false, error:'Not enough tickets remaining', remaining });
+  if (tierRemaining < quantity) return res.status(409).json({ ok:false, error:'Not enough tickets remaining for this ticket type', remaining:tierRemaining });
   const name = String(req.body.name || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
   if (!name || !email.includes('@')) return res.status(400).json({ ok:false, error:'Valid name and email are required' });
-  const amountMinor = (event.priceMinor || 0) * quantity;
-  const order = { id:'ord_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), eventId:event.id, event:event.title, name, email, quantity, amountMinor, status:'pending_payment', createdAt:new Date().toISOString() };
+  const subtotalMinor = Number(tier?.priceMinor ?? event.priceMinor ?? 0) * quantity;
+  const promoCode = String(req.body.promoCode || '').trim().toUpperCase();
+  const promo = promoCode ? promoCodes.find(p=>p.code===promoCode && p.active) : null;
+  if (promoCode && !promo) return res.status(404).json({ ok:false, error:'Promo code not found or inactive' });
+  const discountMinor = calculatePromoDiscount(subtotalMinor, promo);
+  const amountMinor = Math.max(0, subtotalMinor - discountMinor);
+  const order = { id:'ord_' + Date.now() + '_' + Math.random().toString(36).slice(2,8), eventId:event.id, event:event.title, ticketTypeId:String(tier?.id || 'general'), ticketTypeName:tier?.name || 'General admission', unitAmountMinor:Number(tier?.priceMinor ?? event.priceMinor ?? 0), name, email, quantity, subtotalMinor, discountMinor, amountMinor, promoCode:promo?.code || null, promo:promo ? publicPromo(promo, subtotalMinor) : null, status:'pending_payment', createdAt:new Date().toISOString() };
   pendingOrders.unshift(order);
-  res.status(201).json({ ok:true, order:safeOrder(order), checkoutUrl:'/payment/' + order.id, paymentRequired:true });
+  res.status(201).json({ ok:true, order:safeOrder(order), checkoutUrl:'/payment/' + order.id, paymentRequired:amountMinor>0, promo:order.promo });
 });
+
 // v43: Stripe Checkout foundation. Tickets are issued only after payment confirmation.
 function getPublicFrontendUrl(req){
   return (process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || req.headers.origin || 'http://localhost:3000').replace(/\/$/, '');
@@ -253,6 +313,7 @@ async function issuePaidTicket(order, provider='manual'){
   pendingOrders = pendingOrders.filter(o => o.id !== order.id);
   if(!order.soldIncrementedAt){
     event.sold = (event.sold || 0) + Number(order.quantity || 1);
+    if(order.ticketTypeId && Array.isArray(event.ticketTypes)){ const tier = event.ticketTypes.find(t=>String(t.id)===String(order.ticketTypeId)); if(tier) tier.sold = Number(tier.sold || 0) + Number(order.quantity || 1); }
     order.soldIncrementedAt = new Date().toISOString();
     const orderIndex = orders.findIndex(o => o.id === order.id);
     if(orderIndex >= 0) orders[orderIndex].soldIncrementedAt = order.soldIncrementedAt;
@@ -288,8 +349,8 @@ app.post('/api/payments/create-payment-intent/:orderId', async (req, res) => {
       currency: process.env.CURRENCY || 'gbp',
       automatic_payment_methods: { enabled: true },
       receipt_email: order.email || undefined,
-      metadata: { orderId: order.id, eventId: event.id },
-      description: (event.title || order.event || 'LocalVibe ticket') + ' x ' + (order.quantity || 1)
+      metadata: { orderId: order.id, eventId: event.id, ticketTypeId: order.ticketTypeId || 'general', promoCode: order.promoCode || '' },
+      description: (event.title || order.event || 'LocalVibe ticket') + (order.ticketTypeName ? ' — ' + order.ticketTypeName : '') + ' x ' + (order.quantity || 1)
     });
     order.stripePaymentIntentId = intent.id;
     order.stripePaymentIntentClientSecret = intent.client_secret;
@@ -363,7 +424,7 @@ app.post('/api/payments/create-checkout-session/:orderId', async (req, res) => {
       mode:'payment',
       payment_method_types:['card'],
       customer_email:order.email || undefined,
-      line_items:[{ price_data:{ currency:(process.env.CURRENCY || 'gbp'), product_data:{ name:event.title || order.event || 'LocalVibe ticket' }, unit_amount:event.priceMinor || 0 }, quantity:order.quantity || 1 }],
+      line_items:[{ price_data:{ currency:(process.env.CURRENCY || 'gbp'), product_data:{ name:(event.title || order.event || 'LocalVibe ticket') + (order.ticketTypeName ? ' — ' + order.ticketTypeName : '') }, unit_amount:Math.max(0, Math.round(Number(order.amountMinor || 0) / Math.max(1, Number(order.quantity || 1)))) }, quantity:order.quantity || 1 }],
       metadata:{ orderId:order.id, eventId:event.id },
       success_url:`${frontend}/payment/${order.id}?stripe=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:`${frontend}/payment/${order.id}?stripe=cancelled`
@@ -696,11 +757,32 @@ app.get('/api/organiser/overview', (req,res)=>{
   res.json({ ok:true, data:{ ticketsSold:totalSold, revenueMinor, revenue:money(revenueMinor), sponsorLeads:sponsorships.length, draftEvents:events.filter(e=>e.status==='pending').length, liveEvents:events.filter(e=>e.status==='published').length } });
 });
 app.get('/api/organiser/events', (req,res)=>res.json({ ok:true, items:events.map(publicEvent) }));
+app.get('/api/admin/promos', (req,res)=>res.json({ ok:true, items:promoCodes }));
+app.post('/api/admin/promos', (req,res)=>{
+  const code = String(req.body.code || '').trim().toUpperCase();
+  if(!code) return res.status(400).json({ ok:false, error:'Promo code is required' });
+  if(promoCodes.some(p=>p.code===code)) return res.status(409).json({ ok:false, error:'Promo code already exists' });
+  const promo = { code, type:req.body.type === 'fixed' ? 'fixed' : 'percent', amount:Number(req.body.amount || 10), amountMinor:Number(req.body.amountMinor || 0), active:req.body.active !== false, createdAt:new Date().toISOString() };
+  promoCodes.unshift(promo);
+  res.status(201).json({ ok:true, item:promo });
+});
+app.patch('/api/admin/promos/:code', (req,res)=>{
+  const promo = promoCodes.find(p=>p.code===String(req.params.code).toUpperCase());
+  if(!promo) return res.status(404).json({ ok:false, error:'Promo code not found' });
+  Object.assign(promo, req.body || {});
+  if(req.body?.code) promo.code = String(req.body.code).trim().toUpperCase();
+  res.json({ ok:true, item:promo });
+});
 app.post('/api/promo/validate', (req,res)=>{
   const code = String(req.body.code||'').trim().toUpperCase();
   const promo = promoCodes.find(p=>p.code===code && p.active);
-  if(!promo) return res.status(404).json({ ok:false, error:'Promo code not found' });
-  res.json({ ok:true, promo });
+  if(!promo) return res.status(404).json({ ok:false, error:'Promo code not found or inactive' });
+  const event = events.find(e=>e.id===String(req.body.eventId || ''));
+  const quantity = Math.max(1, Math.min(10, Number(req.body.quantity || 1)));
+  let subtotalMinor = Number(req.body.subtotalMinor || 0);
+  if(event && !subtotalMinor){ const tier = getTicketSelection(event, req.body.ticketTypeId || 'general'); subtotalMinor = Number(tier?.priceMinor || event.priceMinor || 0) * quantity; }
+  res.json({ ok:true, promo:publicPromo(promo, subtotalMinor), subtotalMinor, totalMinor:Math.max(0, subtotalMinor - calculatePromoDiscount(subtotalMinor, promo)) });
 });
+
 
 app.listen(port, () => console.log(`API running on ${port}`));
