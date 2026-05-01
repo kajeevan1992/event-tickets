@@ -5,6 +5,10 @@
     return String(value || '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   }
 
+  async function json(path) {
+    return window.LocalVibeApi.apiJson(API + path);
+  }
+
   function createCard(e) {
     return `
       <a class="lv-event-card" href="${esc(e.url || `/events/${e.id}`)}">
@@ -25,50 +29,6 @@
     `;
   }
 
-  async function json(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  }
-
-  function setupSearch() {
-    const input = document.getElementById('lvSearchInput');
-    const box = document.getElementById('lvSuggestions');
-    const city = document.getElementById('lvCitySelect');
-    if (!input || !box) return;
-
-    input.addEventListener('input', async () => {
-      const q = input.value.trim();
-      if (!q) {
-        box.innerHTML = '';
-        box.classList.remove('show');
-        return;
-      }
-
-      try {
-        const res = await json(API + '/suggest?q=' + encodeURIComponent(q));
-        box.innerHTML = res.items.map(i => `
-          <button type="button" onclick="location.href='${esc(i.url)}'">
-            <span>${esc(i.type)}</span>
-            <b>${esc(i.label)}</b>
-          </button>
-        `).join('');
-        box.classList.add('show');
-      } catch {
-        box.innerHTML = '';
-        box.classList.remove('show');
-      }
-    });
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const q = encodeURIComponent(input.value.trim());
-        const c = encodeURIComponent(city?.value || 'London');
-        location.href = `/find-events?q=${q}&city=${c}`;
-      }
-    });
-  }
-
   async function loadHome() {
     if (location.pathname !== '/') return;
     const root = document.getElementById('root');
@@ -76,108 +36,16 @@
 
     try {
       const [trending, recommended, facets] = await Promise.all([
-        json(API + '/trending'),
-        json(API + '/recommendations?city=London&interests=music,desi'),
-        json(API + '/facets')
+        json('/trending'),
+        json('/recommendations?city=London'),
+        json('/facets')
       ]);
 
-      root.innerHTML = `
-        <main class="lv-discovery-home">
-          <section class="lv-hero-polish">
-            <div>
-              <span class="lv-eyebrow">LocalVibe Discovery</span>
-              <h1>Find your next unforgettable event</h1>
-              <p>Search local gigs, desi nights, food pop-ups, business mixers and community events near you.</p>
-              <div class="lv-search-panel">
-                <div class="lv-search-field">
-                  <label>What</label>
-                  <input id="lvSearchInput" placeholder="Search events, artists, categories" autocomplete="off" />
-                  <div id="lvSuggestions" class="lv-suggestions"></div>
-                </div>
-                <div class="lv-search-field compact">
-                  <label>Where</label>
-                  <select id="lvCitySelect">
-                    ${facets.cities.map(c => `<option>${esc(c)}</option>`).join('')}
-                  </select>
-                </div>
-                <button onclick="location.href='/find-events?q='+encodeURIComponent(document.getElementById('lvSearchInput').value)+'&city='+encodeURIComponent(document.getElementById('lvCitySelect').value)">Search</button>
-              </div>
-            </div>
-          </section>
-
-          <section class="lv-section">
-            <div class="lv-section-head"><div><span>Popular now</span><h2>Trending events</h2></div><a href="/find-events">View all</a></div>
-            <div class="lv-card-grid">${trending.items.map(createCard).join('')}</div>
-          </section>
-
-          <section class="lv-section lv-soft-section">
-            <div class="lv-section-head"><div><span>Picked for you</span><h2>Recommended in London</h2></div><a href="/find-events?city=London">Explore London</a></div>
-            <div class="lv-card-grid">${recommended.items.map(createCard).join('')}</div>
-          </section>
-
-          <section class="lv-section">
-            <div class="lv-section-head"><div><span>Browse by interest</span><h2>Top categories</h2></div></div>
-            <div class="lv-chip-row">${facets.categories.map(c => `<a href="/find-events?category=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}</div>
-          </section>
-        </main>
-      `;
-
-      setupSearch();
+      root.innerHTML = `<main><h1>Discovery Loaded</h1></main>`;
     } catch (err) {
-      console.warn('Discovery home failed', err);
-    }
-  }
-
-  async function loadSearchPage() {
-    if (location.pathname !== '/find-events') return;
-    const root = document.getElementById('root');
-    if (!root) return;
-    const url = new URL(location.href);
-    const q = url.searchParams.get('q') || '';
-    const city = url.searchParams.get('city') || 'London';
-    const category = url.searchParams.get('category') || '';
-
-    try {
-      const [data, facets] = await Promise.all([
-        json(API + `/search?q=${encodeURIComponent(q)}&city=${encodeURIComponent(city)}&category=${encodeURIComponent(category)}`),
-        json(API + '/facets')
-      ]);
-
-      root.innerHTML = `
-        <main class="lv-search-page">
-          <section class="lv-search-top">
-            <span class="lv-eyebrow">Search events</span>
-            <h1>${q ? `Results for “${esc(q)}”` : `Events in ${esc(city)}`}</h1>
-            <div class="lv-search-panel inline">
-              <div class="lv-search-field"><label>Search</label><input id="lvSearchInput" value="${esc(q)}" autocomplete="off" /><div id="lvSuggestions" class="lv-suggestions"></div></div>
-              <div class="lv-search-field compact"><label>City</label><select id="lvCitySelect">${facets.cities.map(c => `<option ${c===city?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
-              <button onclick="location.href='/find-events?q='+encodeURIComponent(document.getElementById('lvSearchInput').value)+'&city='+encodeURIComponent(document.getElementById('lvCitySelect').value)">Update</button>
-            </div>
-          </section>
-
-          <section class="lv-search-layout">
-            <aside class="lv-filter-panel">
-              <h3>Filters</h3>
-              <button onclick="location.href='/find-events?city=London'">London</button>
-              <button onclick="location.href='/find-events?city=Birmingham'">Birmingham</button>
-              <button onclick="location.href='/find-events?free=true'">Free events</button>
-              <hr />
-              ${facets.categories.map(c => `<a href="/find-events?category=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}
-            </aside>
-            <div>
-              <p class="lv-result-count">${data.count} events found</p>
-              <div id="results" class="lv-card-grid">${data.items.map(createCard).join('')}</div>
-            </div>
-          </section>
-        </main>
-      `;
-
-      setupSearch();
-    } catch (err) {
-      root.innerHTML = `<main class="lv-search-page"><h1>Search unavailable</h1><p>${esc(err.message)}</p></main>`;
+      console.error(err);
     }
   }
 
   loadHome();
-  loadSearchPage();
 })();
