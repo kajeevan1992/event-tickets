@@ -7,6 +7,7 @@ import globalPayoutRoutes from './routes/global-payouts.js';
 import analyticsRoutes from './routes/analytics.js';
 import discoveryRoutes from './routes/discovery.js';
 import seoRoutes from './routes/seo.js';
+import eventsCompatRoutes from './routes/events-compat.js';
 
 if (!express.application.__localvibeReferralAutoloadPatched) {
   express.application.__localvibeReferralAutoloadPatched = true;
@@ -24,6 +25,7 @@ if (!express.application.__localvibeReferralAutoloadPatched) {
       this.use('/api/analytics', analyticsRoutes);
       this.use('/api/discovery', discoveryRoutes);
       this.use('/api/seo', seoRoutes);
+      this.use('/api/events', eventsCompatRoutes);
     }
 
     return originalListen.apply(this, args);
