@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Event {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  title          String
+  description    String?
+  city           String
+  country        String   @default("GB")
+  category       String
+  tags           String[] @default([])
+  venue          String?
+  image          String?
+  priceMinor     Int      @default(0)
+  currency       String   @default("GBP")
+  startDate      DateTime?
+  dateLabel      String?
+  timeLabel      String?
+  status         String   @default("published")
+  organiserId    String?
+  organiserName  String?
+  views          Int      @default(0)
+  checkoutStarts Int      @default(0)
+  orders         Int      @default(0)
+  ticketsSold    Int      @default(0)
+  score          Int      @default(0)
+  trending       Boolean  @default(false)
+  seoTitle       String?
+  seoDescription String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([city])
+  @@index([country])
+  @@index([category])
+  @@index([status])
+  @@index([trending])
+}
+
+model LandingPage {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  title          String
+  seoTitle       String
+  seoDescription String
+  city           String?
+  country        String?  @default("GB")
+  category       String?
+  hero           String?
+  keywords       String[] @default([])
+  content        String
+  status         String   @default("published")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([city])
+  @@index([country])
+  @@index([category])
+  @@index([status])
+}
+
+model SearchEvent {
+  id        String   @id @default(cuid())
+  query     String
+  city      String?
+  country   String?
+  results   Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([query])
+  @@index([city])
+  @@index([createdAt])
+}
