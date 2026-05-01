@@ -293,5 +293,18 @@ function AdminOrderOps(){
   </DashShell>
 }
 
+
+class ErrorBoundary extends React.Component{
+  constructor(props){super(props);this.state={hasError:false,error:null};}
+  static getDerivedStateFromError(error){return{hasError:true,error};}
+  componentDidCatch(error,info){console.error('LocalVibe UI crash protected:',error,info);}
+  render(){
+    if(this.state.hasError){
+      return <div className="lv-error-boundary"><div><h1>Something went wrong</h1><p>The page hit a UI error, but the app is still running. Try refreshing or go back home.</p><pre>{String(this.state.error?.message||'UI error')}</pre><a href="/">Go home</a></div></div>;
+    }
+    return this.props.children;
+  }
+}
+
 function App(){return <Routes><Route path="/" element={<Home/>}/><Route path="/events" element={<FindEvents/>}/><Route path="/find-events" element={<FindEvents/>}/><Route path="/updates" element={<Updates/>}/><Route path="/create-events" element={<CreateEvents/>}/><Route path="/contact-sales" element={<ContactSales/>}/><Route path="/help" element={<Help/>}/><Route path="/events/london" element={<CityEvents/>}/><Route path="/events/city/:city" element={<CityEvents/>}/><Route path="/events/:id" element={<EventDetail/>}/><Route path="/organiser" element={<Organiser/>}/><Route path="/organiser/create" element={<EventBuilder/>}/><Route path="/dashboard" element={<Dashboard/>}/><Route path="/my-orders" element={<MyOrders/>}/><Route path="/admin" element={<Admin/>}/><Route path="/admin/dashboard" element={<AdminAnalytics/>}/><Route path="/admin/attendees" element={<AttendeeManager/>}/><Route path="/admin/events" element={<AdminEventManager/>}/><Route path="/admin/promos" element={<AdminPromos/>}/><Route path="/admin/orders/:orderId" element={<AdminOrderOps/>}/> <Route path="/scanner" element={<ScannerPage/>}/><Route path="/check-in" element={<ScannerPage/>}/><Route path="/checkout/:id" element={<Checkout/>}/><Route path="/payment/:orderId" element={<PaymentPage/>}/><Route path="/ticket/:ticketId" element={<TicketPage/>}/><Route path="/signin" element={<Signin/>}/><Route path="/tickets-login" element={<Signin tickets/>}/><Route path="*" element={<Home/>}/></Routes>}
 createRoot(document.getElementById('root')).render(<BrowserRouter><ErrorBoundary><App/></ErrorBoundary></BrowserRouter>);

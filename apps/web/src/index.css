@@ -76,3 +76,5 @@
 .inline-form input{flex:1}
 .inline-form button{white-space:nowrap}
 .active-tier{border-color:#7c3aed!important;background:rgba(124,58,237,.08)}
+
+.lv-error-boundary{min-height:100vh;display:grid;place-items:center;background:#f7f7f8;padding:24px}.lv-error-boundary>div{max-width:560px;background:#fff;border:1px solid #eee;border-radius:24px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.08)}.lv-error-boundary h1{margin-top:0}.lv-error-boundary pre{white-space:pre-wrap;font-size:12px;background:#f4f4f5;padding:12px;border-radius:12px}
