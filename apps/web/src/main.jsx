@@ -351,6 +351,115 @@ function AdminOrderOps(){
   </DashShell>
 }
 
+function EventDetail(){
+  const { id } = useParams();
+  const { event, loading, error } = useEventDetail(id);
+
+  if (!event) {
+    return (
+      <Shell>
+        <main className="event-detail-page">
+          <section className="checkout-card">
+            <h1>Event not found</h1>
+            <p>We could not find this event.</p>
+            <Link to="/find-events">Back to events</Link>
+          </section>
+        </main>
+        <BigFooter />
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <main className="event-detail-page">
+        <Breadcrumbs items={["Home", "Events", event.title || "Event"]} />
+
+        {error && <div className="api-note">{error}</div>}
+        {loading && <div className="api-note">Loading live event details...</div>}
+
+        <section className="event-detail-hero">
+          <img src={event.image} alt={event.title} />
+
+          <div>
+            <span className="eyebrow">
+              {event.category || event.vibe || "Local event"}
+            </span>
+
+            <h1>{event.title}</h1>
+
+            <p>
+              {event.desc ||
+                event.description ||
+                "Discover this event on LocalVibe."}
+            </p>
+
+            <div className="event-meta-grid">
+              <div>
+                <Calendar size={18} />
+                <span>
+                  {event.date || "Date TBC"}{" "}
+                  {event.time ? `· ${event.time}` : ""}
+                </span>
+              </div>
+
+              <div>
+                <MapPin size={18} />
+                <span>
+                  {event.venue || event.location || event.city || "Location TBC"}
+                </span>
+              </div>
+
+              <div>
+                <Ticket size={18} />
+                <span>{event.price || "Free"}</span>
+              </div>
+            </div>
+
+            <Link className="primary-full" to={`/checkout/${event.id}`}>
+              Get tickets
+            </Link>
+          </div>
+        </section>
+
+        <section className="two-col">
+          <Panel title="About this event" icon={<FileText />}>
+            <p>
+              {event.longDescription ||
+                event.desc ||
+                event.description ||
+                "More event details will appear here."}
+            </p>
+          </Panel>
+
+          <Panel title="Event details" icon={<ShieldCheck />}>
+            <div className="clean-row">
+              <b>Event ID</b>
+              <span>{event.id}</span>
+            </div>
+
+            <div className="clean-row">
+              <b>City</b>
+              <span>{event.city || "London"}</span>
+            </div>
+
+            <div className="clean-row">
+              <b>Venue</b>
+              <span>{event.venue || event.location || "TBC"}</span>
+            </div>
+
+            <div className="clean-row">
+              <b>Status</b>
+              <span>{event.status || "Live"}</span>
+            </div>
+          </Panel>
+        </section>
+      </main>
+
+      <BigFooter />
+    </Shell>
+  );
+}
 
 class ErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={hasError:false,error:null};}
