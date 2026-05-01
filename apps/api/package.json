@@ -4,9 +4,13 @@
   "version": "1.0.4",
   "type": "module",
   "scripts": {
-    "dev": "node --watch --import ./src/referral-autoload.js src/server.js",
-    "build": "node -e \"console.log('api build ok')\"",
-    "start": "node --import ./src/referral-autoload.js src/server.js"
+    "dev": "prisma generate && node --watch --import ./src/referral-autoload.js src/server.js",
+    "build": "prisma generate && node -e \"console.log('api build ok')\"",
+    "start": "node --import ./src/referral-autoload.js src/server.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.js",
+    "db:setup": "prisma generate && prisma db push && node prisma/seed.js"
   },
   "dependencies": {
     "@prisma/client": "latest",
