@@ -461,6 +461,57 @@ function EventDetail(){
   );
 }
 
+function Organiser(){
+  return (
+    <DashShell title="Organiser overview" type="organiser">
+      <div className="stats eb-stats four">
+        <Stat t="Events" v="Manage" />
+        <Stat t="Tickets" v="Live" />
+        <Stat t="Check-in" v="Ready" />
+        <Stat t="Payments" v="Stripe" />
+      </div>
+
+      <div className="two-col">
+        <Panel title="Create and manage events" icon={<Calendar />}>
+          <div className="clean-row">
+            <b>Create a new event</b>
+            <span>Build event details, ticket types, capacity and pricing.</span>
+            <Link to="/organiser/create">Create event</Link>
+          </div>
+
+          <div className="clean-row">
+            <b>Manage live events</b>
+            <span>Edit, clone, approve or review event performance.</span>
+            <Link to="/admin/events">Manage events</Link>
+          </div>
+        </Panel>
+
+        <Panel title="Door and attendee tools" icon={<QrCode />}>
+          <div className="clean-row">
+            <b>QR scanner</b>
+            <span>Scan tickets at the door and block duplicate check-ins.</span>
+            <Link to="/scanner">Open scanner</Link>
+          </div>
+
+          <div className="clean-row">
+            <b>Attendee list</b>
+            <span>View paid attendees and export check-in data.</span>
+            <Link to="/admin/attendees">View attendees</Link>
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title="Next steps" icon={<Ticket />}>
+        <div className="clean-row">
+          <b>Test full flow</b>
+          <span>Event → checkout → Stripe payment → ticket QR → check-in.</span>
+          <Link to="/find-events">Run test purchase</Link>
+        </div>
+      </Panel>
+    </DashShell>
+  );
+}
+
 class ErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={hasError:false,error:null};}
   static getDerivedStateFromError(error){return{hasError:true,error};}
