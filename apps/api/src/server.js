@@ -941,4 +941,16 @@ app.get('/api/admin/events/:id/stats', (req,res)=>{
   res.json({ ok:true, item:eventAnalytics(event) });
 });
 
+
+// v71: lightweight production readiness/system status endpoint for Coolify checks.
+app.get('/api/admin/system', (req,res)=>{
+  const paymentConfig = getPaymentConfig();
+  const now = new Date().toISOString();
+  const publishedEvents = events.filter(e=>e.status==='published').length;
+  const pendingEvents = events.filter(e=>e.status==='pending').length;
+  const paidOrders = orders.filter(o=>String(o.status)==='paid' || String(o.status)==='checked_in').length;
+  const pendingOrderCount = pendingOrders.filter(o=>String(o.status)==='pending').length;
+  res.json({ ok:true, generatedAt:now, system:{ service:'localvibe-api', version:BUILD_VERSION, node:process.version, uptimeSeconds:Math.round(process.uptime()), environment:process.env.NODE_ENV||'development' }, checks:{ api:true, stripeSecret:paymentConfig.stripeEnabled, stripeWebhook:paymentConfig.webhookConfigured, testPayments:paymentConfig.testPaymentsEnabled, frontendUrl:Boolean(process.env.FRONTEND_URL) }, counts:{ events:events.length, publishedEvents, pendingEvents, orders:orders.length, paidOrders, pendingOrders:pendingOrderCount, ticketsIssued:orders.filter(o=>o.ticketId).length, emailRequests:emailDeliveries.length } });
+});
+
 app.listen(port, () => console.log(`API running on ${port}`));
