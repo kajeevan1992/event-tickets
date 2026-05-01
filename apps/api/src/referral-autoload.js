@@ -5,6 +5,7 @@ import stripeConnectRoutes from './routes/stripe-connect.js';
 import marketplaceRoutes from './routes/marketplace-payments.js';
 import globalPayoutRoutes from './routes/global-payouts.js';
 import analyticsRoutes from './routes/analytics.js';
+import discoveryRoutes from './routes/discovery.js';
 
 if (!express.application.__localvibeReferralAutoloadPatched) {
   express.application.__localvibeReferralAutoloadPatched = true;
@@ -13,7 +14,6 @@ if (!express.application.__localvibeReferralAutoloadPatched) {
   express.application.listen = function localvibeListen(...args) {
     if (!this.__localvibeReferralRoutesMounted) {
       this.__localvibeReferralRoutesMounted = true;
-
       this.use('/api/referrals', referralRoutes);
       this.use('/ref', referralRoutes);
       this.use('/api/payouts', payoutRoutes);
@@ -21,6 +21,7 @@ if (!express.application.__localvibeReferralAutoloadPatched) {
       this.use('/api/marketplace', marketplaceRoutes);
       this.use('/api/global-payouts', globalPayoutRoutes);
       this.use('/api/analytics', analyticsRoutes);
+      this.use('/api/discovery', discoveryRoutes);
     }
 
     return originalListen.apply(this, args);
