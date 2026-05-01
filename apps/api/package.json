@@ -4,9 +4,9 @@
   "version": "1.0.4",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.js",
+    "dev": "node --watch --import ./src/referral-autoload.js src/server.js",
     "build": "node -e \"console.log('api build ok')\"",
-    "start": "node src/server.js"
+    "start": "node --import ./src/referral-autoload.js src/server.js"
   },
   "dependencies": {
     "@prisma/client": "latest",
